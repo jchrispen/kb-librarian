@@ -234,7 +234,7 @@ For each file in raw/:
 - **Hash present, status=success:** duplicate. File moves to `raw/processed/YYYY-MM/duplicates/`, entry written to `review/duplicates.md`. Surfaces in `kb review`. Does **not** silently re-process.
 - **Hash present, status=error:** retried; cleared on success.
 - **Hash absent:** processed normally.
-- **Same filename, different content:** new file; archive auto-suffixes (`paper.pdf` → `paper-2.pdf`).
+- **Same filename, different content:** treated as new (different hash); archive auto-suffixes (`paper.pdf` → `paper-2.pdf`); new hash recorded in `.kb/ingested.json`.
 - **Updated version of previously-ingested file** (filename match, hash differs): processed as new + entry in `review/duplicates.md` flagging "you re-ingested an updated version; existing notes may need revision."
 - **`kb ingest <file> --force`** clears the hash entry and re-runs.
 - **Near-duplicates** (same content in different formats, e.g., PDF + HTML) caught at integration step, not file level — matching atomic claims hit the `identical` verdict and append sources.
@@ -475,9 +475,19 @@ Committed format: **end-of-response citation block** (Question 7 layer-2 / Optio
 
 Threshold-based, with mandatory review gate (Question 8 / Option C).
 
-- Librarian flags a topic for compaction when heuristics fire — primarily `duplicate_cluster_threshold` (default 4 near-duplicates detected during integration over time).
-- Flagged clusters appear in `review/pending-compaction.md`.
-- User runs `kb compact <cluster-id>` (or `kb compact <topic>`) to enter the proposal flow.
+**Detection mechanism.** Compaction candidates are detected by a periodic scan that runs as a post-pass after `kb ingest` (and on demand via `kb reindex --scan-clusters`):
+
+1. For each topic (leaf-level), compute pairwise similarity across all notes using the cheap candidate filter (title-token overlap + tag overlap).
+2. For pairs scoring above a similarity floor, run a Haiku verdict call: `identical | adds_nuance | contradicts | unrelated`.
+3. Group `identical` and `adds_nuance` pairs into clusters via union-find.
+4. When a cluster size reaches `duplicate_cluster_threshold` (default 4), write the cluster to `review/pending-compaction.md` with note IDs, similarity scores, and a one-line summary of overlap.
+5. To keep the scan cheap, the cluster scan runs only on topics that received new notes since the last scan (tracked in `.kb/state.json`). A full rescan is available via `kb reindex --scan-clusters --all`.
+
+**Other compaction triggers** (additive):
+- A topic accumulates >N unresolved `adds_nuance` proposals in `review/merge-proposals.md` — the related notes get bundled as a single compaction candidate.
+- User invokes `kb compact <topic>` directly without a flagged cluster — librarian generates a proposal across the whole topic.
+
+Flagged clusters appear in `review/pending-compaction.md`. User runs `kb compact <cluster-id>` (or `kb compact <topic>`) to enter the proposal flow.
 
 ### 8.2 Proposal flow
 
@@ -594,7 +604,7 @@ The smallest thing that proves the loop works.
 3. Frontmatter parsing/writing + note schema.
 4. `kb init` — directory structure, config, preamble.
 5. `kb add` — stdin / `$EDITOR` → `raw/`.
-6. `kb ingest` — atomization + integration (create / identical / contradicts / adds_nuance) + topic via subdir-or-classifier.
+6. `kb ingest` — atomization + integration (create / identical / contradicts / adds_nuance) + topic determination chain (subdir → frontmatter → classifier → review queue).
 7. `kb reindex` — INDEX.md regeneration from frontmatter.
 8. `kb search` — basic title/body/tag matching with budget flag.
 9. `kb get` — fetch a note.
