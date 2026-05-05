@@ -26,6 +26,7 @@ When a milestone is completed (for example `01a`), keep its plan file as the his
 - Do not delete or repurpose completed milestone plan files.
 - For subsequent work, treat completed milestones as locked historical context and build forward from the next milestone unless fixing a confirmed regression.
 - If completion details change (for example, additional verification), append/update the completion record rather than removing prior context.
+- Also update the parent phase plan milestone table/order (for example `01-agent-first-walking-skeleton.md`) in the same change so `Complete`/`Next`/`Pending` states stay synchronized.
 
 ## Implementation Planning
 

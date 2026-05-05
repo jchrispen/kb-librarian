@@ -13,7 +13,7 @@ Phase 1 starts from an empty tool repo and should not depend on later-phase ergo
 | Milestone | Status | Notes |
 |---|---|---|
 | [01a - Scaffold, Config, and Note Model](01a-scaffold-config-note-model.md) | Complete | Implemented package scaffold, config/init, note model/templates, and tests. Retained as completed record. |
-| [01b - Index, Search, Get, and Add](01b-index-search-get-add.md) | Next | Builds on 01a config, note model, templates, and init layout. |
+| [01b - Index, Search, Get, and Add](01b-index-search-get-add.md) | Complete | Implemented add/reindex/search/get, storage/indexing modules, and milestone tests. Retained as completed record. |
 | [01c - Provider and Ingest](01c-provider-and-ingest.md) | Pending | Depends on 01a and 01b. |
 | [01d - Integration and Basic Review](01d-integration-review.md) | Pending | Depends on 01a, 01b, and 01c. |
 | [01e - Context and End-to-End Proof](01e-context-e2e.md) | Pending | Depends on 01a through 01d. |
@@ -22,9 +22,9 @@ Phase 1 starts from an empty tool repo and should not depend on later-phase ergo
 
 1. [01a - Scaffold, Config, and Note Model](01a-scaffold-config-note-model.md) - complete
    - Bootstraps the Python package, `kb` entry point, config loading, `kb init`, and markdown/frontmatter note model.
-2. [01b - Index, Search, Get, and Add](01b-index-search-get-add.md) - next
+2. [01b - Index, Search, Get, and Add](01b-index-search-get-add.md) - complete
    - Adds direct note creation, deterministic generated indexes, local lexical search, and note inspection.
-3. [01c - Provider and Ingest](01c-provider-and-ingest.md) - pending
+3. [01c - Provider and Ingest](01c-provider-and-ingest.md) - next
    - Adds the provider abstraction, Anthropic adapter, mock provider, markdown/txt ingest, extraction, classification, dedup, and raw archiving.
 4. [01d - Integration and Basic Review](01d-integration-review.md) - pending
    - Adds candidate matching, integration verdict handling, source appends, merge/dispute review queues, and basic review output.
