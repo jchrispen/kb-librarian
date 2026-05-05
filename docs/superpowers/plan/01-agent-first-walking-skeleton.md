@@ -8,17 +8,27 @@ Build the smallest useful KB Librarian that proves the agent-first thesis: an ag
 
 Phase 1 starts from an empty tool repo and should not depend on later-phase ergonomics, compaction, PDF/HTML parsing, embeddings, hooks, cron jobs, or automation.
 
+## Milestone Status
+
+| Milestone | Status | Notes |
+|---|---|---|
+| [01a - Scaffold, Config, and Note Model](01a-scaffold-config-note-model.md) | Complete | Implemented package scaffold, config/init, note model/templates, and tests. Retained as completed record. |
+| [01b - Index, Search, Get, and Add](01b-index-search-get-add.md) | Next | Builds on 01a config, note model, templates, and init layout. |
+| [01c - Provider and Ingest](01c-provider-and-ingest.md) | Pending | Depends on 01a and 01b. |
+| [01d - Integration and Basic Review](01d-integration-review.md) | Pending | Depends on 01a, 01b, and 01c. |
+| [01e - Context and End-to-End Proof](01e-context-e2e.md) | Pending | Depends on 01a through 01d. |
+
 ## Milestone Order
 
-1. [01a - Scaffold, Config, and Note Model](01a-scaffold-config-note-model.md)
+1. [01a - Scaffold, Config, and Note Model](01a-scaffold-config-note-model.md) - complete
    - Bootstraps the Python package, `kb` entry point, config loading, `kb init`, and markdown/frontmatter note model.
-2. [01b - Index, Search, Get, and Add](01b-index-search-get-add.md)
+2. [01b - Index, Search, Get, and Add](01b-index-search-get-add.md) - next
    - Adds direct note creation, deterministic generated indexes, local lexical search, and note inspection.
-3. [01c - Provider and Ingest](01c-provider-and-ingest.md)
+3. [01c - Provider and Ingest](01c-provider-and-ingest.md) - pending
    - Adds the provider abstraction, Anthropic adapter, mock provider, markdown/txt ingest, extraction, classification, dedup, and raw archiving.
-4. [01d - Integration and Basic Review](01d-integration-review.md)
+4. [01d - Integration and Basic Review](01d-integration-review.md) - pending
    - Adds candidate matching, integration verdict handling, source appends, merge/dispute review queues, and basic review output.
-5. [01e - Context and End-to-End Proof](01e-context-e2e.md)
+5. [01e - Context and End-to-End Proof](01e-context-e2e.md) - pending
    - Adds `kb context`, context modes, synthesis, source citations, and the 20-50 note acceptance scenario.
 
 Each milestone should leave the CLI runnable and covered by focused tests. Later milestones may adjust earlier code, but they should preserve the public behavior accepted by earlier milestones.

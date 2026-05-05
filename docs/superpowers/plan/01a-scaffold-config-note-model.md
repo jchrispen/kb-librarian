@@ -2,6 +2,24 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
+Status: Complete  
+Completed: 2026-05-05  
+Archive note: This milestone plan is retained as the completed implementation record. Do not delete it; future work should treat it as historical context and build from Phase 01b unless a regression in this milestone is found.
+
+## Completion Record
+
+Implemented in:
+
+- `pyproject.toml`
+- `src/kb_librarian/`
+- `tests/`
+
+Verified with:
+
+- `python3 -m pytest` -> 18 passed
+- Editable install smoke check for `kb --help`
+- Manual `kb init --data-dir <tmp>` idempotency check
+
 ## Goal
 
 Create a bootable Python CLI and local KB file model. At the end of this milestone, an agent can install the package, run `kb init`, and validate markdown/frontmatter notes even though ingest, retrieval, and provider-backed behavior are not implemented yet.
