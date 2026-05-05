@@ -19,3 +19,19 @@ class NoteParseError(KBLibrarianError):
 
 class MilestoneNotImplementedError(KBLibrarianError):
     """Raised for commands intentionally deferred beyond the current milestone."""
+
+
+class DuplicateNoteIdError(KBLibrarianError):
+    """Raised when the same note ID exists in more than one file."""
+
+
+class SearchIndexError(KBLibrarianError):
+    """Raised when the local lexical index is missing or invalid."""
+
+
+class NoteNotFoundError(KBLibrarianError):
+    """Raised when a requested note ID cannot be found."""
+
+
+class AmbiguousNoteIdError(KBLibrarianError):
+    """Raised when a requested note ID maps to more than one note file."""

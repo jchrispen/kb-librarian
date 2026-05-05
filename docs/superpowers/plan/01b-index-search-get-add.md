@@ -2,6 +2,27 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
+Status: Complete  
+Completed: 2026-05-05  
+Archive note: This milestone plan is retained as the completed implementation record. Do not delete it; future work should treat it as historical context and build from Phase 01c unless a regression in this milestone is found.
+
+## Completion Record
+
+Implemented in:
+
+- `src/kb_librarian/cli.py`
+- `src/kb_librarian/errors.py`
+- `src/kb_librarian/storage.py`
+- `src/kb_librarian/indexing.py`
+- `src/kb_librarian/search_index.py`
+- `tests/test_cli.py`
+- `tests/test_storage.py`
+- `tests/test_indexing.py`
+
+Verified with:
+
+- `python3 -m pytest` -> 27 passed
+
 ## Goal
 
 Make manually created KB notes retrievable. At the end of this milestone, an agent can add seed notes, rebuild deterministic local indexes, search those notes, and inspect a selected note by ID.

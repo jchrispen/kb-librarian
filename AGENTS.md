@@ -17,6 +17,16 @@ When implementing a milestone, assign the whole runnable increment to a coding-f
 
 Keep implementation scoped to the active milestone. Preserve earlier milestone interfaces and data layouts unless the canonical spec requires a change. Run the relevant automated tests before handing off, and note any tests that could not be run.
 
+## Milestone Status Maintenance
+
+When a milestone is completed (for example `01a`), keep its plan file as the historical completion record and update status in place.
+
+- Mark the milestone plan with explicit completion metadata (at minimum: `Status: Complete` and completion date).
+- Add or maintain a short completion record listing implemented files and verification commands/results.
+- Do not delete or repurpose completed milestone plan files.
+- For subsequent work, treat completed milestones as locked historical context and build forward from the next milestone unless fixing a confirmed regression.
+- If completion details change (for example, additional verification), append/update the completion record rather than removing prior context.
+
 ## Implementation Planning
 
 When creating implementation plans, optimize for future coding agents with limited context.

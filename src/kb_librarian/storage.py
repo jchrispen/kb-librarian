@@ -1,0 +1,113 @@
+"""Note storage and repository traversal helpers."""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable
+
+from kb_librarian.errors import DuplicateNoteIdError, NoteParseError, NoteValidationError
+from kb_librarian.notes import Note, read_note
+
+TOPIC_SAFE_PATTERN = re.compile(r"[^a-z0-9]+")
+NOTE_ID_REFERENCE_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*\b")
+
+TOPIC_SCOPE_TEMPLATE = (
+    "Describe what this topic is for and what it is not for.\n"
+    "This file is intentionally user-editable.\n"
+)
+
+
+@dataclass(frozen=True)
+class NoteRecord:
+    """One canonical note plus its repository path metadata."""
+
+    path: Path
+    topic_path: str
+    note: Note
+
+    @property
+    def note_id(self) -> str:
+        return str(self.note.frontmatter["id"])
+
+
+def normalize_topic_for_path(topic: str) -> str:
+    normalized = TOPIC_SAFE_PATTERN.sub("-", topic.strip().lower()).strip("-")
+    return normalized or "untitled-topic"
+
+
+def topic_dir_path(data_dir: Path, topic: str) -> Path:
+    return data_dir / "topics" / normalize_topic_for_path(topic)
+
+
+def topic_scope_path(data_dir: Path, topic: str) -> Path:
+    return topic_dir_path(data_dir, topic) / "scope.txt"
+
+
+def canonical_note_path(data_dir: Path, topic: str, note_id: str) -> Path:
+    return topic_dir_path(data_dir, topic) / f"{note_id}.md"
+
+
+def ensure_topic_layout(data_dir: Path, topic: str) -> list[Path]:
+    created: list[Path] = []
+    topic_dir = topic_dir_path(data_dir, topic)
+    if not topic_dir.exists():
+        topic_dir.mkdir(parents=True, exist_ok=True)
+        created.append(topic_dir)
+    else:
+        topic_dir.mkdir(parents=True, exist_ok=True)
+
+    scope_path = topic_dir / "scope.txt"
+    if not scope_path.exists():
+        scope_path.write_text(TOPIC_SCOPE_TEMPLATE, encoding="utf-8")
+        created.append(scope_path)
+    return created
+
+
+def iter_note_files(data_dir: Path) -> list[Path]:
+    topics_root = data_dir / "topics"
+    if not topics_root.exists():
+        return []
+
+    files: list[Path] = []
+    for path in sorted(topics_root.rglob("*.md")):
+        if path.name == "INDEX.md":
+            continue
+        files.append(path)
+    return files
+
+
+def load_note_records(data_dir: Path, *, validate: bool = True) -> list[NoteRecord]:
+    records: list[NoteRecord] = []
+    topics_root = data_dir / "topics"
+    for note_path in iter_note_files(data_dir):
+        try:
+            note = read_note(note_path, validate=validate)
+        except (NoteParseError, NoteValidationError) as exc:
+            raise type(exc)(f"{exc} (file: {note_path})") from exc
+
+        topic_dir = note_path.parent
+        topic_rel = topic_dir.relative_to(topics_root).as_posix()
+        records.append(NoteRecord(path=note_path, topic_path=topic_rel, note=note))
+    return records
+
+
+def ensure_unique_note_ids(records: Iterable[NoteRecord]) -> None:
+    by_id: dict[str, list[Path]] = {}
+    for record in records:
+        by_id.setdefault(record.note_id, []).append(record.path)
+
+    duplicates = {note_id: paths for note_id, paths in by_id.items() if len(paths) > 1}
+    if not duplicates:
+        return
+
+    lines = ["Duplicate note IDs detected:"]
+    for note_id in sorted(duplicates):
+        listed = ", ".join(str(path) for path in sorted(duplicates[note_id]))
+        lines.append(f"- {note_id}: {listed}")
+    raise DuplicateNoteIdError("\n".join(lines))
+
+
+def existing_note_ids(records: Iterable[NoteRecord]) -> set[str]:
+    return {record.note_id for record in records}
