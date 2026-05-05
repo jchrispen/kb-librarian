@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from kb_librarian.config import default_config, write_config_file
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -111,6 +113,32 @@ def test_kb_add_without_direct_metadata_queues_raw(tmp_path):
     assert raw_files[0].read_text(encoding="utf-8") == payload
 
 
+def test_kb_ingest_mock_provider_smoke(tmp_path):
+    init_result = run_cli("init", "--data-dir", str(tmp_path))
+    assert init_result.returncode == 0
+
+    config = default_config(tmp_path)
+    config["providers"]["mock"] = {}
+    config["operations"]["extract"] = {"provider": "mock", "model": "mock-extract"}
+    config["operations"]["classify"] = {"provider": "mock", "model": "mock-classify"}
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    source = tmp_path / "raw" / "agent-context.md"
+    source.write_text(
+        "# CLI context retrieval\n\nPrefer task-shaped context for coding agents.\n",
+        encoding="utf-8",
+    )
+
+    result = run_cli("ingest", "--data-dir", str(tmp_path))
+
+    assert result.returncode == 0
+    assert "Ingest report:" in result.stdout
+    assert "created_notes: 1" in result.stdout
+    assert "errors: 0" in result.stdout
+    assert not source.exists()
+    assert list((tmp_path / "topics" / "agent-systems").glob("*.md"))
+
+
 def test_kb_get_missing_id_returns_clear_error(tmp_path):
     run_cli("init", "--data-dir", str(tmp_path))
     result = run_cli("get", "2026-01-01-missing", "--data-dir", str(tmp_path))
@@ -123,4 +151,4 @@ def test_placeholder_command_returns_nonzero_with_clear_error():
     result = run_cli("context", "agent context task")
 
     assert result.returncode == 1
-    assert "kb context is not implemented in Phase 01b" in result.stderr
+    assert "kb context is not implemented in Phase 01c" in result.stderr

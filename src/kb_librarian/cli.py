@@ -20,6 +20,7 @@ from kb_librarian.errors import (
 )
 from kb_librarian.indexing import ReindexResult, reindex_data_dir
 from kb_librarian.init import initialize_data_dir
+from kb_librarian.ingest import ingest, render_report
 from kb_librarian.notes import KNOWLEDGE_TYPES, Note, body_template, generate_note_id, parse_note_text, write_note
 from kb_librarian.search_index import query_candidates, score_document, tokenize_query
 from kb_librarian.storage import (
@@ -31,7 +32,7 @@ from kb_librarian.storage import (
     normalize_topic_for_path,
 )
 
-PHASE = "Phase 01b"
+PHASE = "Phase 01c"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -47,6 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_reindex_parser(subcommands)
     _add_search_parser(subcommands)
     _add_get_parser(subcommands)
+    _add_ingest_parser(subcommands)
     _add_placeholder_parsers(subcommands)
     return parser
 
@@ -85,11 +87,6 @@ def _add_init_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentPa
 def _add_placeholder_parsers(
     subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> None:
-    ingest_parser = _placeholder_parser(subcommands, "ingest", "Ingest markdown or text into candidate notes.")
-    ingest_parser.add_argument("file", nargs="?", help="Future input file.")
-    ingest_parser.add_argument("--force", action="store_true", help="Future reprocess flag.")
-    ingest_parser.add_argument("--quiet", action="store_true", help="Future quiet output flag.")
-
     context_parser = _placeholder_parser(subcommands, "context", "Return task-shaped context.")
     context_parser.add_argument("task", nargs="?", help="Future task description.")
     context_parser.add_argument("--mode", help="Future context mode.")
@@ -173,6 +170,19 @@ def _add_get_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentPar
     parser.set_defaults(handler=_handle_get)
 
 
+def _add_ingest_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subcommands.add_parser(
+        "ingest",
+        help="Ingest markdown or text into candidate notes.",
+        description="Process one markdown/text file or pending markdown/text files under raw/.",
+    )
+    parser.add_argument("file", nargs="?", help="Optional markdown/text file to ingest.")
+    parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
+    parser.add_argument("--force", action="store_true", help="Reprocess even if the raw hash was previously successful.")
+    parser.add_argument("--quiet", action="store_true", help="Suppress the success report.")
+    parser.set_defaults(handler=_handle_ingest)
+
+
 def _handle_init(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     created = initialize_data_dir(data_dir, hooks=args.hooks)
@@ -186,6 +196,24 @@ def _handle_init(args: argparse.Namespace) -> int:
 
 def _handle_placeholder(args: argparse.Namespace) -> int:
     raise MilestoneNotImplementedError(f"kb {args.command} is not implemented in {PHASE}.")
+
+
+def _handle_ingest(args: argparse.Namespace) -> int:
+    data_dir = resolve_data_dir(args.data_dir)
+    initialize_data_dir(data_dir)
+    config = load_config(data_dir)
+    report = ingest(
+        data_dir,
+        config=config,
+        file_path=args.file,
+        force=bool(args.force),
+        quiet=bool(args.quiet),
+    )
+    if not args.quiet:
+        print(render_report(report), end="")
+    elif report.errors:
+        print(f"error: ingest completed with {report.errors} errors; see {data_dir / '.kb' / 'errors.log'}", file=sys.stderr)
+    return 1 if report.errors else 0
 
 
 def _handle_add(args: argparse.Namespace) -> int:

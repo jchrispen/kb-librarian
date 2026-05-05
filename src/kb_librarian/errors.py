@@ -35,3 +35,11 @@ class NoteNotFoundError(KBLibrarianError):
 
 class AmbiguousNoteIdError(KBLibrarianError):
     """Raised when a requested note ID maps to more than one note file."""
+
+
+class ProviderError(KBLibrarianError):
+    """Raised when provider configuration or responses are invalid."""
+
+
+class IngestError(KBLibrarianError):
+    """Raised when ingest cannot proceed safely."""

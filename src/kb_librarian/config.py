@@ -238,3 +238,17 @@ def validate_config(config: Mapping[str, Any]) -> None:
         raise ConfigError("Config section providers.anthropic must be a mapping.")
     if not anthropic.get("api_key_env"):
         raise ConfigError("Config key providers.anthropic.api_key_env is required.")
+
+    providers = config["providers"]
+    for operation in REQUIRED_SECTION_KEYS["operations"]:
+        route = config["operations"][operation]
+        if not isinstance(route, Mapping):
+            raise ConfigError(f"Config operation {operation} must be a mapping.")
+        provider = route.get("provider")
+        model = route.get("model")
+        if not isinstance(provider, str) or not provider.strip():
+            raise ConfigError(f"Config operation {operation}.provider must be a non-empty string.")
+        if not isinstance(model, str) or not model.strip():
+            raise ConfigError(f"Config operation {operation}.model must be a non-empty string.")
+        if provider not in providers:
+            raise ConfigError(f"Config operation {operation} references unknown provider {provider!r}.")

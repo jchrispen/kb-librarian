@@ -2,6 +2,27 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
+Status: Complete
+Completed: 2026-05-05
+Archive note: This milestone plan is retained as the completed implementation record. Do not delete it; future work should treat it as historical context and build from Phase 01d unless a regression in this milestone is found.
+
+## Completion Record
+
+Implemented in:
+
+- `src/kb_librarian/cli.py`
+- `src/kb_librarian/config.py`
+- `src/kb_librarian/errors.py`
+- `src/kb_librarian/providers.py`
+- `src/kb_librarian/ingest.py`
+- `tests/test_cli.py`
+- `tests/test_ingest.py`
+- `tests/test_providers.py`
+
+Verified with:
+
+- `python3 -m pytest` -> 38 passed
+
 ## Goal
 
 Add provider-backed markdown/txt ingest. At the end of this milestone, raw files can be parsed, deduplicated, classified, extracted into candidate notes, written as new notes when no integration risk is detected, archived, and tested without network access through a mock provider.
