@@ -11,6 +11,12 @@ When implementing or extending KB Librarian, read the canonical design spec for 
 
 The Phase 5+ items in the spec are deferred backlog. Do not create or implement Phase 5 work unless explicitly requested.
 
+## Milestone Implementation
+
+When implementing a milestone, assign the whole runnable increment to a coding-focused model with enough reasoning for cross-file integration, CLI behavior, and tests. Use smaller models only for isolated helper changes or narrow test additions.
+
+Keep implementation scoped to the active milestone. Preserve earlier milestone interfaces and data layouts unless the canonical spec requires a change. Run the relevant automated tests before handing off, and note any tests that could not be run.
+
 ## Implementation Planning
 
 When creating implementation plans, optimize for future coding agents with limited context.
