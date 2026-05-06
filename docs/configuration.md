@@ -122,7 +122,7 @@ Useful retrieval settings:
 - `tag_weight`: tag match weight
 - `body_weight`: body text match weight
 
-Retrieval commands also write append-only usage signals to `.kb/usage.log`. Empty, weak, or explicitly reported poor searches write `.kb/search-misses.log`; the aggregate counters in `.kb/stats.json` are rebuildable from those logs.
+Retrieval commands also write append-only usage signals to `.kb/usage.log`. Empty, weak, or explicitly reported poor searches write `.kb/search-misses.log`; suspect-note feedback from `kb flag-suspect` is also appended to `.kb/usage.log`. Aggregate counters in `.kb/stats.json` are rebuildable from those logs.
 
 ## Ingest Settings
 
@@ -136,6 +136,8 @@ Useful ingest settings:
 
 Useful review settings:
 
+- `stale_after_days`: baseline age window before stale-note flags are considered
+- `orphan_after_days`: age window used when checking isolated notes with no links or recent usage
 - `duplicate_cluster_threshold`: minimum overlapping notes required before `kb reindex --scan-clusters` queues a compaction cluster
 - `compaction_cooldown_days`: days before a rejected compaction cluster can be reopened by another scan
 - `max_review_items_per_run`: maximum items shown by default in `kb review`

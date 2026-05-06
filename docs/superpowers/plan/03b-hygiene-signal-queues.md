@@ -1,5 +1,8 @@
 # Phase 03b - Hygiene Signal Queues
 
+Status: Complete
+Completed: 2026-05-06
+
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
 ## Goal
@@ -81,6 +84,39 @@ Surface knowledge that is aging badly, isolated, or not helping agents much. At 
 - `kb flag-suspect` records the issue and updates review state without rewriting notes.
 - Hygiene queue generation remains bounded and idempotent.
 - Review items clearly distinguish why a note needs attention.
+
+## Completion Record
+
+Completed on 2026-05-06.
+
+Implemented files:
+
+- `src/kb_librarian/hygiene.py`
+- `src/kb_librarian/review.py`
+- `src/kb_librarian/usage.py`
+- `src/kb_librarian/indexing.py`
+- `src/kb_librarian/cli.py`
+- `src/kb_librarian/paths.py`
+- `src/kb_librarian/init.py`
+- `tests/test_hygiene.py`
+- `tests/test_cli.py`
+- `tests/test_usage.py`
+- `README.md`
+- `docs/commands.md`
+- `docs/configuration.md`
+- `docs/user-guide.md`
+
+Verification:
+
+- `pytest -q tests/test_hygiene.py tests/test_usage.py tests/test_review.py tests/test_cli.py tests/test_indexing.py tests/test_init.py` - passed, 43 tests.
+- `pytest -q` - passed, 88 tests.
+
+Behavior delivered:
+
+- `kb reindex --scan-clusters` now refreshes stale, orphan, and low-utility queues in durable review state and generated markdown surfaces.
+- `review/stale.md`, `review/orphans.md`, and `review/low-utility.md` are rendered from `review/review-items.json` with explainable evidence fields.
+- `kb flag-suspect <id> \"<reason>\"` appends structured suspect events and upserts low-utility or dispute review items without mutating note bodies.
+- Hygiene items are deduplicated by stable fingerprints and refreshed only when evidence materially changes.
 
 ## Out of Scope
 

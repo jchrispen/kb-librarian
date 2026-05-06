@@ -13,8 +13,8 @@ Phase 3 assumes Phase 1 and Phase 2 are complete.
 | Milestone | Status | Notes |
 |---|---|---|
 | [03a - Compaction Detection and Proposal Flow](03a-compaction-detection-and-proposal-flow.md) | Complete | Added duplicate-cluster detection, `kb compact`, and durable review proposals without rewriting notes automatically. |
-| [03b - Hygiene Signal Queues](03b-hygiene-signal-queues.md) | Next | Adds stale, orphan, and low-utility review items plus `kb flag-suspect`. |
-| [03c - Doctor and Scaled Index Surfaces](03c-doctor-and-scaled-index-surfaces.md) | Pending | Adds `kb doctor` and deterministic pagination for large indexes. |
+| [03b - Hygiene Signal Queues](03b-hygiene-signal-queues.md) | Complete | Added stale/orphan/low-utility hygiene queues, explainable evidence payloads, and `kb flag-suspect`. |
+| [03c - Doctor and Scaled Index Surfaces](03c-doctor-and-scaled-index-surfaces.md) | Next | Adds `kb doctor` and deterministic pagination for large indexes. |
 | [03d - Hierarchical Topics and Tree Views](03d-hierarchical-topics-and-tree-views.md) | Pending | Adds nested topics, generated nested topic artifacts, and `kb topics --tree`. |
 | [03e - Review-Gated Hygiene Mutations](03e-review-gated-hygiene-mutations.md) | Pending | Applies accepted compaction and topic-reorganization changes safely under review control. |
 
@@ -22,9 +22,9 @@ Phase 3 assumes Phase 1 and Phase 2 are complete.
 
 1. [03a - Compaction Detection and Proposal Flow](03a-compaction-detection-and-proposal-flow.md) - complete
    - Identifies overlapping note clusters and turns them into explicit reviewable compaction proposals.
-2. [03b - Hygiene Signal Queues](03b-hygiene-signal-queues.md) - next
+2. [03b - Hygiene Signal Queues](03b-hygiene-signal-queues.md) - complete
    - Surfaces stale, orphaned, and low-utility knowledge with explainable evidence and bounded review items.
-3. [03c - Doctor and Scaled Index Surfaces](03c-doctor-and-scaled-index-surfaces.md) - pending
+3. [03c - Doctor and Scaled Index Surfaces](03c-doctor-and-scaled-index-surfaces.md) - next
    - Adds health checks and keeps large published indexes inspectable without affecting retrieval behavior.
 4. [03d - Hierarchical Topics and Tree Views](03d-hierarchical-topics-and-tree-views.md) - pending
    - Introduces nested topic structure and hierarchy-aware inspection while preserving retrieval compatibility.

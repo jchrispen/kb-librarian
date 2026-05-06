@@ -6,7 +6,7 @@ It stores durable knowledge as markdown files in a separate data directory, buil
 
 ## Status
 
-This repository currently ships the Phase 1 core workflow, Phase 2 daily-use ergonomics, and the Phase 3a compaction proposal flow:
+This repository currently ships the Phase 1 core workflow, Phase 2 daily-use ergonomics, the Phase 3a compaction proposal flow, and the Phase 3b hygiene signal queues:
 
 - `kb init`
 - `kb add`
@@ -19,6 +19,7 @@ This repository currently ships the Phase 1 core workflow, Phase 2 daily-use erg
 - `kb context`
 - `kb explore`
 - `kb log-use`
+- `kb flag-suspect`
 - `kb usage`
 
 Planned later-phase features such as doctor diagnostics, topic reorganization, and automation templates are documented in the design and implementation plans, but they are not part of the shipped CLI yet.
@@ -31,6 +32,7 @@ Planned later-phase features such as doctor diagnostics, topic reorganization, a
 - Preserves review-gated behavior for risky integrations
 - Returns compact, cited context for coding and design tasks
 - Detects overlapping note clusters and drafts reviewable compaction proposals without rewriting notes
+- Surfaces stale, orphan, and low-utility notes with explainable review evidence
 
 ## Install
 
@@ -112,7 +114,10 @@ Important review files:
 - `review/pending-merge.md`: generated view for merge proposals
 - `review/pending-compaction.md`: generated view for compaction clusters and proposals
 - `review/disputes.md`: generated view for contradictions
+- `review/stale.md`: generated view for stale-note reverification work
+- `review/orphans.md`: generated view for isolated note cleanup
 - `review/search-misses.md`: generated view for repeated or explicitly reported search misses
+- `review/low-utility.md`: generated view for low-utility and suspect signals
 - `PREAMBLE.md`: agent-facing retrieval guidance installed by `kb init --hooks`
 
 ## Core Commands
@@ -128,6 +133,7 @@ Important review files:
 - `kb context`: retrieve compact cited context for a task
 - `kb explore`: retrieve broader adjacent ideas and alternatives
 - `kb log-use`: record that an agent used or cited a note
+- `kb flag-suspect`: record correction/suspect feedback and upsert hygiene review items
 - `kb usage`: summarize retrieval, note-use, and search-miss signals
 
 ## Provider Notes

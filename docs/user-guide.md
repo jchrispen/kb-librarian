@@ -126,13 +126,13 @@ This rebuilds generated artifacts such as:
 - `.kb/stats.json`
 - `.kb/fts.sqlite`
 
-To detect overlapping notes and queue compaction work:
+To detect overlapping notes and queue compaction plus hygiene work:
 
 ```bash
 kb reindex --scan-clusters --data-dir /path/to/kb
 ```
 
-Cluster scanning respects `review.duplicate_cluster_threshold` and `review.compaction_cooldown_days`. It creates review items only; it does not rewrite notes.
+This scan respects `review.duplicate_cluster_threshold`, `review.compaction_cooldown_days`, `review.stale_after_days`, and `review.orphan_after_days`. It creates or refreshes review items only; it does not rewrite notes.
 
 ## Search and Inspect Notes
 
@@ -237,6 +237,14 @@ Usage summaries include retrieval counts, explicit note-use counts, top retrieve
 - `.kb/search-misses.log`
 - `.kb/stats.json`
 
+Flag suspect notes when retrieved context is wrong, stale, or otherwise not useful:
+
+```bash
+kb flag-suspect 2026-05-04-agent-context-cli-contract "outdated guidance for current workflow" --data-dir /path/to/kb
+```
+
+This appends a structured suspect event and upserts either a `low_utility` item or a contradiction-oriented `dispute` item.
+
 ## Review Pending Work
 
 Use `kb review` to inspect bounded review queues.
@@ -251,7 +259,10 @@ Review items are stored in `review/review-items.json` with stable IDs, status, p
 - `review/pending-merge.md`
 - `review/pending-compaction.md`
 - `review/disputes.md`
+- `review/stale.md`
+- `review/orphans.md`
 - `review/search-misses.md`
+- `review/low-utility.md`
 
 `kb review` and `kb review list` read from `review/review-items.json`, hide resolved items from default output, hide deferred items until due, and bound the number of listed items using `review.max_review_items_per_run`. If a Phase 1 KB only has markdown queues, the first review run imports those entries into durable state and rerenders the queue files.
 

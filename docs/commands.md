@@ -25,7 +25,7 @@ Notes:
 
 ## `kb reindex`
 
-Rebuild markdown and lexical indexes from note files. Use `--scan-clusters` to also detect overlapping note clusters and queue compaction review items.
+Rebuild markdown and lexical indexes from note files. Use `--scan-clusters` to also detect overlapping note clusters and refresh stale/orphan/low-utility hygiene queues.
 
 ```bash
 kb reindex [--data-dir <path>] [--scan-clusters]
@@ -107,6 +107,9 @@ Rendered review views include:
 - `review/pending-compaction.md`
 - `review/disputes.md`
 - `review/search-misses.md`
+- `review/stale.md`
+- `review/orphans.md`
+- `review/low-utility.md`
 
 ## `kb compact`
 
@@ -148,6 +151,19 @@ kb log-use <id> [--task <task>] [--data-dir <path>]
 ```
 
 The note ID is validated before the append-only event is written to `.kb/usage.log`.
+
+## `kb flag-suspect`
+
+Record that a note appears incorrect, stale, or otherwise not useful.
+
+```bash
+kb flag-suspect <id> "<reason>" [--data-dir <path>]
+```
+
+`kb flag-suspect` appends a structured `suspect-flag` event to `.kb/usage.log`, then upserts either:
+
+- a `low_utility` review item in `review/low-utility.md`, or
+- a `dispute` review item in `review/disputes.md` when the reason looks contradiction-oriented.
 
 ## `kb usage`
 
