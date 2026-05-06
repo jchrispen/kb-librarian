@@ -58,6 +58,20 @@ def test_kb_init_smoke_and_idempotency(tmp_path):
     assert "Already initialized" in second.stdout
 
 
+def test_kb_init_hooks_installs_agent_preamble_guidance(tmp_path):
+    result = run_cli("init", "--hooks", "--data-dir", str(tmp_path))
+    second = run_cli("init", "--hooks", "--data-dir", str(tmp_path))
+
+    preamble = (tmp_path / "PREAMBLE.md").read_text(encoding="utf-8")
+    assert result.returncode == 0
+    assert "Agent preamble installed at" in result.stdout
+    assert "Include that file in agent session instructions" in result.stdout
+    assert "kb context" in preamble
+    assert "kb explore" in preamble
+    assert second.returncode == 0
+    assert "Agent preamble installed at" in second.stdout
+
+
 def test_kb_add_search_get_and_reindex_smoke(tmp_path):
     source = tmp_path / "seed.md"
     source.write_text(
@@ -149,9 +163,24 @@ def test_kb_ingest_mock_provider_smoke(tmp_path):
     assert result.returncode == 0
     assert "Ingest report:" in result.stdout
     assert "created_notes: 1" in result.stdout
+    assert "created_note_ids:" in result.stdout
     assert "errors: 0" in result.stdout
     assert not source.exists()
     assert list((tmp_path / "topics" / "agent-systems").glob("*.md"))
+
+    json_source = tmp_path / "raw" / "json-agent-context.md"
+    json_source.write_text(
+        "# JSON context retrieval\n\nPrefer cited JSON reports for coding agents.\n",
+        encoding="utf-8",
+    )
+    json_result = run_cli("ingest", "--json", "--data-dir", str(tmp_path))
+    payload = json.loads(json_result.stdout)
+
+    assert json_result.returncode == 0
+    assert payload["processed_files"] == 1
+    assert payload["created_notes"]["count"] == 1
+    assert payload["created_notes"]["note_ids"]
+    assert payload["errors"] == 0
 
 
 def test_kb_context_mock_provider_smoke(tmp_path):

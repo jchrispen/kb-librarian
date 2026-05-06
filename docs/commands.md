@@ -8,6 +8,8 @@ Initialize a local KB data directory without overwriting existing content.
 kb init [--data-dir <path>] [--hooks]
 ```
 
+`--hooks` creates or refreshes the tool-managed `PREAMBLE.md` and prints instructions for including that file in agent session instructions. It does not edit external agent configuration files.
+
 ## `kb add`
 
 Create a note directly when `--topic` and `--type` are present. Otherwise queue raw input.
@@ -64,13 +66,15 @@ kb get <id> [--data-dir <path>] [--summary]
 Ingest one markdown or text file, or process pending files in `raw/`.
 
 ```bash
-kb ingest [<file>] [--data-dir <path>] [--force] [--quiet]
+kb ingest [<file>] [--data-dir <path>] [--force] [--quiet] [--json]
 ```
 
 Current shipped supported input formats:
 
 - `.md`
 - `.txt`
+
+Human-readable and JSON reports include outcome counts, created/appended note IDs, review item IDs for queued work, archived raw paths, warnings, and errors. `--quiet` suppresses the success report and only prints errors.
 
 ## `kb review`
 

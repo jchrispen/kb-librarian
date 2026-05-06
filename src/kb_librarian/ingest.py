@@ -53,7 +53,10 @@ class IngestReport:
     source_appends: list[str] = field(default_factory=list)
     merge_proposals: list[str] = field(default_factory=list)
     disputes: list[str] = field(default_factory=list)
-    classification_items: list[Path] = field(default_factory=list)
+    dispute_items: list[str] = field(default_factory=list)
+    classification_items: list[str] = field(default_factory=list)
+    duplicate_items: list[str] = field(default_factory=list)
+    unsupported_file_items: list[str] = field(default_factory=list)
     review_paths: list[Path] = field(default_factory=list)
     skipped_candidates: int = 0
     duplicates: int = 0
@@ -80,7 +83,9 @@ def ingest(
         if path.suffix.lower() not in SUPPORTED_SUFFIXES:
             report.unsupported_files += 1
             _log_error(data_dir, f"Unsupported ingest file extension for {path}")
-            queue_unsupported_file_review_item(data_dir, source_path=path)
+            item_id = queue_unsupported_file_review_item(data_dir, source_path=path)
+            if item_id:
+                report.unsupported_file_items.append(item_id)
             continue
 
         try:
@@ -89,13 +94,15 @@ def ingest(
             if duplicate_path is not None:
                 report.duplicates += 1
                 report.archived_paths.append(duplicate_path)
-                queue_duplicate_review_item(
+                item_id = queue_duplicate_review_item(
                     data_dir,
                     source_name=parsed.path.name,
                     source_path=parsed.path,
                     source_hash=parsed.digest,
                     archived_path=duplicate_path,
                 )
+                if item_id:
+                    report.duplicate_items.append(item_id)
                 continue
             if _has_filename_with_different_hash(data_dir, parsed):
                 report.warnings.append(f"Possible updated version: {path.name}")
@@ -136,40 +143,106 @@ def parse_ingest_file(path: Path) -> ParsedInput:
 
 
 def render_report(report: IngestReport) -> str:
+    payload = ingest_report_payload(report)
     lines = [
         "Ingest report:",
-        f"processed_files: {report.processed_files}",
-        f"created_notes: {len(report.created_notes)}",
-        f"source_appends: {len(report.source_appends)}",
-        f"merge_proposals: {len(report.merge_proposals)}",
-        f"disputes: {len(report.disputes)}",
-        f"classification_items: {len(report.classification_items)}",
-        f"skipped_candidates: {report.skipped_candidates}",
-        f"duplicates: {report.duplicates}",
-        f"unsupported_files: {report.unsupported_files}",
-        f"errors: {report.errors}",
+        f"processed_files: {payload['processed_files']}",
+        f"created_notes: {payload['created_notes']['count']}",
+        f"source_appends: {payload['source_appends']['count']}",
+        f"merge_proposals: {payload['merge_proposals']['count']}",
+        f"disputes: {payload['disputes']['count']}",
+        f"classification_items: {payload['classification_items']['count']}",
+        f"skipped_candidates: {payload['skipped_candidates']}",
+        f"duplicates: {payload['duplicates']['count']}",
+        f"unsupported_files: {payload['unsupported_files']['count']}",
+        f"errors: {payload['errors']}",
     ]
-    if report.created_notes:
+    if payload["created_notes"]["note_ids"]:
         lines.append("created_note_ids:")
-        lines.extend(f"- {note_id}" for note_id in report.created_notes)
-    if report.source_appends:
+        lines.extend(f"- {note_id}" for note_id in payload["created_notes"]["note_ids"])
+    if payload["source_appends"]["note_ids"]:
         lines.append("source_appended_note_ids:")
-        lines.extend(f"- {note_id}" for note_id in report.source_appends)
-    if report.disputes:
+        lines.extend(f"- {note_id}" for note_id in payload["source_appends"]["note_ids"])
+    if payload["merge_proposals"]["review_item_ids"]:
+        lines.append("merge_review_item_ids:")
+        lines.extend(f"- {item_id}" for item_id in payload["merge_proposals"]["review_item_ids"])
+    if payload["disputes"]["note_ids"]:
         lines.append("disputed_note_ids:")
-        lines.extend(f"- {note_id}" for note_id in sorted(set(report.disputes)))
-    if report.review_paths:
+        lines.extend(f"- {note_id}" for note_id in payload["disputes"]["note_ids"])
+    if payload["disputes"]["review_item_ids"]:
+        lines.append("dispute_review_item_ids:")
+        lines.extend(f"- {item_id}" for item_id in payload["disputes"]["review_item_ids"])
+    if payload["classification_items"]["review_item_ids"]:
+        lines.append("classification_review_item_ids:")
+        lines.extend(f"- {item_id}" for item_id in payload["classification_items"]["review_item_ids"])
+    if payload["duplicates"]["review_item_ids"]:
+        lines.append("duplicate_review_item_ids:")
+        lines.extend(f"- {item_id}" for item_id in payload["duplicates"]["review_item_ids"])
+    if payload["unsupported_files"]["review_item_ids"]:
+        lines.append("unsupported_file_review_item_ids:")
+        lines.extend(f"- {item_id}" for item_id in payload["unsupported_files"]["review_item_ids"])
+    if payload["review_paths"]:
         lines.append("review_paths:")
-        for path in sorted(set(report.review_paths)):
+        for path in payload["review_paths"]:
             lines.append(f"- {path}")
-    if report.archived_paths:
+    if payload["archived_paths"]:
         lines.append("archived_paths:")
-        for path in report.archived_paths:
+        for path in payload["archived_paths"]:
             lines.append(f"- {path}")
-    if report.warnings:
+    if payload["warnings"]:
         lines.append("warnings:")
-        lines.extend(f"- {warning}" for warning in report.warnings)
+        lines.extend(f"- {warning}" for warning in payload["warnings"])
     return "\n".join(lines) + "\n"
+
+
+def ingest_report_payload(report: IngestReport) -> dict[str, Any]:
+    """Return stable JSON-compatible report fields used by human and JSON output."""
+
+    review_item_ids = [
+        *report.merge_proposals,
+        *report.dispute_items,
+        *report.classification_items,
+        *report.duplicate_items,
+        *report.unsupported_file_items,
+    ]
+    return {
+        "processed_files": report.processed_files,
+        "created_notes": {
+            "count": len(report.created_notes),
+            "note_ids": list(report.created_notes),
+        },
+        "source_appends": {
+            "count": len(report.source_appends),
+            "note_ids": list(report.source_appends),
+        },
+        "merge_proposals": {
+            "count": len(report.merge_proposals),
+            "review_item_ids": list(report.merge_proposals),
+        },
+        "disputes": {
+            "count": len(set(report.disputes)),
+            "note_ids": sorted(set(report.disputes)),
+            "review_item_ids": list(report.dispute_items),
+        },
+        "classification_items": {
+            "count": len(report.classification_items),
+            "review_item_ids": list(report.classification_items),
+        },
+        "skipped_candidates": report.skipped_candidates,
+        "duplicates": {
+            "count": report.duplicates,
+            "review_item_ids": list(report.duplicate_items),
+        },
+        "unsupported_files": {
+            "count": report.unsupported_files,
+            "review_item_ids": list(report.unsupported_file_items),
+        },
+        "errors": report.errors,
+        "review_item_ids": review_item_ids,
+        "review_paths": sorted({path.as_posix() for path in report.review_paths}),
+        "archived_paths": [path.as_posix() for path in report.archived_paths],
+        "warnings": list(report.warnings),
+    }
 
 
 def _selected_files(data_dir: Path, file_path: str | Path | None) -> list[Path]:
@@ -230,8 +303,14 @@ def _ingest_one(
             model=classify_route.model,
         )
         if _needs_classification_review(config, candidate, classification):
-            _append_classification_review(data_dir, parsed=parsed, candidate=candidate, classification=classification)
-            report.classification_items.append(data_dir / "review" / "pending-classification.md")
+            item_id = _append_classification_review(
+                data_dir,
+                parsed=parsed,
+                candidate=candidate,
+                classification=classification,
+            )
+            if item_id:
+                report.classification_items.append(item_id)
             report.review_paths.append(data_dir / "review" / "pending-classification.md")
             continue
 
@@ -256,7 +335,7 @@ def _ingest_one(
             target_records = _target_records(matches, records, integration)
         except ProviderError as exc:
             report.errors += 1
-            _append_classification_review(
+            item_id = _append_classification_review(
                 data_dir,
                 parsed=parsed,
                 candidate=candidate,
@@ -264,7 +343,8 @@ def _ingest_one(
                 reason=f"integration verdict error: {exc}",
             )
             review_path = data_dir / "review" / "pending-classification.md"
-            report.classification_items.append(review_path)
+            if item_id:
+                report.classification_items.append(item_id)
             report.review_paths.append(review_path)
             continue
 
@@ -310,24 +390,27 @@ def _ingest_one(
             report.disputes.extend(disputed_ids)
             if disputed_ids:
                 mutated = True
-            _append_dispute_review(
+            item_id = _append_dispute_review(
                 data_dir,
                 parsed=parsed,
                 candidate=candidate,
                 target_note_ids=[record.note_id for record in target_records],
                 rationale=integration.rationale,
             )
+            if item_id:
+                report.dispute_items.append(item_id)
             report.review_paths.append(data_dir / "review" / "disputes.md")
         else:
             report.errors += 1
-            _append_classification_review(
+            item_id = _append_classification_review(
                 data_dir,
                 parsed=parsed,
                 candidate=candidate,
                 classification=classification,
                 reason=f"unknown integration verdict: {integration.verdict}",
             )
-            report.classification_items.append(data_dir / "review" / "pending-classification.md")
+            if item_id:
+                report.classification_items.append(item_id)
             report.review_paths.append(data_dir / "review" / "pending-classification.md")
 
         if mutated:
@@ -561,7 +644,7 @@ def _append_dispute_review(
     candidate: CandidateNote,
     target_note_ids: list[str],
     rationale: str,
-) -> None:
+) -> str | None:
     fingerprint = _review_fingerprint(
         "dispute",
         source_hash=parsed.digest,
@@ -569,7 +652,7 @@ def _append_dispute_review(
         candidate_body=candidate.body,
         target_note_ids=target_note_ids,
     )
-    add_review_item(
+    return add_review_item(
         data_dir,
         queue="dispute",
         title=candidate.title,
@@ -655,7 +738,7 @@ def _append_classification_review(
     candidate: CandidateNote,
     classification: ClassificationResult,
     reason: str | None = None,
-) -> None:
+) -> str | None:
     payload = {
         "source": parsed.path.as_posix(),
         "source_hash": parsed.digest,
@@ -673,7 +756,7 @@ def _append_classification_review(
         candidate_body=json.dumps(payload, sort_keys=True),
         target_note_ids=[],
     )
-    add_review_item(
+    return add_review_item(
         data_dir,
         queue="classification",
         title=candidate.title,

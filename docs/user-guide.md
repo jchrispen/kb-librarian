@@ -28,6 +28,14 @@ Create a KB data directory:
 kb init --data-dir /path/to/kb
 ```
 
+Install or refresh the agent-facing preamble:
+
+```bash
+kb init --hooks --data-dir /path/to/kb
+```
+
+`--hooks` writes the tool-managed `PREAMBLE.md` and prints the path to include in agent session instructions. It does not edit external agent configuration files.
+
 This creates:
 
 - top-level KB files such as `INDEX.md` and `PREAMBLE.md`
@@ -93,6 +101,14 @@ Ingest may:
 - mark disputes
 - record duplicate and unsupported-file review items
 - archive processed raw files
+
+The default report includes stable counts plus the note IDs and review item IDs that need attention. JSON output is available for automation:
+
+```bash
+kb ingest --json --data-dir /path/to/kb
+```
+
+Use `--quiet` when only errors should be printed.
 
 ## Rebuild Indexes
 

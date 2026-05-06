@@ -6,7 +6,7 @@ It stores durable knowledge as markdown files in a separate data directory, buil
 
 ## Status
 
-This repository currently ships the Phase 1 core workflow plus the Phase 2 durable review-state increment:
+This repository currently ships the Phase 1 core workflow plus Phase 2 daily-use ergonomics:
 
 - `kb init`
 - `kb add`
@@ -16,8 +16,11 @@ This repository currently ships the Phase 1 core workflow plus the Phase 2 durab
 - `kb get`
 - `kb review`
 - `kb context`
+- `kb explore`
+- `kb log-use`
+- `kb usage`
 
-Planned later-phase features such as `kb explore`, usage logging, compaction, and automation templates are documented in the design and implementation plans, but they are not part of the shipped CLI yet.
+Planned later-phase features such as compaction, doctor diagnostics, and automation templates are documented in the design and implementation plans, but they are not part of the shipped CLI yet.
 
 ## What It Does
 
@@ -52,6 +55,12 @@ kb --help
 
 ```bash
 kb init --data-dir /path/to/kb
+```
+
+To install or refresh agent session guidance:
+
+```bash
+kb init --hooks --data-dir /path/to/kb
 ```
 
 2. Create a note directly.
@@ -100,7 +109,8 @@ Important review files:
 - `review/pending-classification.md`: generated view for classification review
 - `review/pending-merge.md`: generated view for merge proposals
 - `review/disputes.md`: generated view for contradictions
-- `review/search-misses.md`: generated view reserved for later search-miss promotion
+- `review/search-misses.md`: generated view for repeated or explicitly reported search misses
+- `PREAMBLE.md`: agent-facing retrieval guidance installed by `kb init --hooks`
 
 ## Core Commands
 
@@ -112,6 +122,9 @@ Important review files:
 - `kb get`: inspect one note by ID
 - `kb review`: inspect and resolve bounded review queues backed by `review/review-items.json`
 - `kb context`: retrieve compact cited context for a task
+- `kb explore`: retrieve broader adjacent ideas and alternatives
+- `kb log-use`: record that an agent used or cited a note
+- `kb usage`: summarize retrieval, note-use, and search-miss signals
 
 ## Provider Notes
 

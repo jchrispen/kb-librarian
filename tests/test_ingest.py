@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from kb_librarian.config import default_config, write_config_file
-from kb_librarian.ingest import ingest, parse_ingest_file
+from kb_librarian.ingest import ingest, ingest_report_payload, parse_ingest_file, render_report
 from kb_librarian.init import initialize_data_dir
 from kb_librarian.notes import Note, read_note, write_note
 from kb_librarian.storage import canonical_note_path, ensure_topic_layout
@@ -93,6 +93,7 @@ def test_ingest_ambiguous_candidate_goes_to_pending_classification(tmp_path):
 
     assert report.created_notes == []
     assert len(report.classification_items) == 1
+    assert report.classification_items[0].startswith("classification-")
     review = (tmp_path / "review" / "pending-classification.md").read_text(encoding="utf-8")
     assert "Ambiguous idea" in review
     assert "confidence: low" in review
@@ -113,6 +114,8 @@ def test_ingest_duplicate_success_hash_archives_to_duplicates(tmp_path):
     second_report = ingest(tmp_path, config=config)
 
     assert second_report.duplicates == 1
+    assert len(second_report.duplicate_items) == 1
+    assert second_report.duplicate_items[0].startswith("duplicate-")
     assert second_report.processed_files == 0
     assert "duplicates" in second_report.archived_paths[0].parts
     entries = json.loads((tmp_path / ".kb" / "ingested.json").read_text(encoding="utf-8"))
@@ -128,6 +131,8 @@ def test_ingest_unsupported_file_logs_and_leaves_raw_file(tmp_path):
     report = ingest(tmp_path, config=config)
 
     assert report.unsupported_files == 1
+    assert len(report.unsupported_file_items) == 1
+    assert report.unsupported_file_items[0].startswith("unsupported-")
     assert report.errors == 0
     assert source.exists()
     assert "Unsupported ingest file extension" in (tmp_path / ".kb" / "errors.log").read_text(encoding="utf-8")
@@ -186,6 +191,7 @@ def test_ingest_adds_nuance_queues_merge_idempotently(tmp_path):
 
     first = ingest(tmp_path, config=config)
     assert len(first.merge_proposals) == 1
+    assert first.merge_proposals[0].startswith("merge-")
     pending_merge = (tmp_path / "review" / "pending-merge.md").read_text(encoding="utf-8")
     assert "candidate_title: CLI context retrieval" in pending_merge
 
@@ -217,8 +223,28 @@ def test_ingest_contradicts_marks_note_disputed_and_writes_review(tmp_path):
     report = ingest(tmp_path, config=config)
 
     assert report.disputes == ["2026-05-04-cli-context-retrieval"]
+    assert len(report.dispute_items) == 1
+    assert report.dispute_items[0].startswith("dispute-")
     disputed = read_note(note_path)
     assert disputed.frontmatter["status"] == "disputed"
     assert disputed.frontmatter["disputes"]
     disputes_doc = (tmp_path / "review" / "disputes.md").read_text(encoding="utf-8")
     assert "Target note IDs: 2026-05-04-cli-context-retrieval" in disputes_doc
+
+
+def test_ingest_report_payload_and_human_output_align(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = configure_mock_provider(tmp_path)
+    source = tmp_path / "raw" / "ambiguous.md"
+    source.write_text("# Ambiguous idea\n\nThis ambiguous agent note needs classification.\n", encoding="utf-8")
+
+    report = ingest(tmp_path, config=config)
+    payload = ingest_report_payload(report)
+    human = render_report(report)
+
+    assert payload["classification_items"]["count"] == 1
+    assert payload["classification_items"]["review_item_ids"] == report.classification_items
+    assert payload["review_item_ids"] == report.classification_items
+    assert f"classification_items: {payload['classification_items']['count']}" in human
+    assert "classification_review_item_ids:" in human
+    assert report.classification_items[0] in human

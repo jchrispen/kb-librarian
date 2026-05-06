@@ -19,8 +19,8 @@ from kb_librarian.errors import (
     NoteValidationError,
 )
 from kb_librarian.indexing import ReindexResult, reindex_data_dir
-from kb_librarian.init import initialize_data_dir
-from kb_librarian.ingest import ingest, render_report
+from kb_librarian.init import initialize_data_dir, render_preamble_guidance
+from kb_librarian.ingest import ingest, ingest_report_payload, render_report
 from kb_librarian.notes import KNOWLEDGE_TYPES, Note, body_template, generate_note_id, parse_note_text, write_note
 from kb_librarian.review import (
     accept_review_item,
@@ -201,6 +201,7 @@ def _add_ingest_parser(subcommands: argparse._SubParsersAction[argparse.Argument
     parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
     parser.add_argument("--force", action="store_true", help="Reprocess even if the raw hash was previously successful.")
     parser.add_argument("--quiet", action="store_true", help="Suppress the success report.")
+    parser.add_argument("--json", action="store_true", help="Return machine-readable ingest report output.")
     parser.set_defaults(handler=_handle_ingest)
 
 
@@ -263,6 +264,8 @@ def _handle_init(args: argparse.Namespace) -> int:
         print(f"Created {len(created)} files/directories.")
     else:
         print("Already initialized; no files changed.")
+    if args.hooks:
+        print(render_preamble_guidance(data_dir), end="")
     return 0
 
 
@@ -277,7 +280,9 @@ def _handle_ingest(args: argparse.Namespace) -> int:
         force=bool(args.force),
         quiet=bool(args.quiet),
     )
-    if not args.quiet:
+    if args.json and not args.quiet:
+        print(json.dumps(ingest_report_payload(report), indent=2, sort_keys=True))
+    elif not args.quiet:
         print(render_report(report), end="")
     elif report.errors:
         print(f"error: ingest completed with {report.errors} errors; see {data_dir / '.kb' / 'errors.log'}", file=sys.stderr)

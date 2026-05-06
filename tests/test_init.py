@@ -5,7 +5,7 @@ import json
 import yaml
 
 from kb_librarian.config import default_config, write_config_file
-from kb_librarian.init import initialize_data_dir
+from kb_librarian.init import LEGACY_PREAMBLE_CONTENT, initialize_data_dir, render_preamble
 from kb_librarian.paths import DIRECTORIES, LOG_FILES, REVIEW_QUEUE_FILES, REVIEW_STATE_FILE, ROOT_FILES, STATE_FILES
 
 
@@ -57,3 +57,39 @@ def test_initialize_data_dir_hooks_flag_only_affects_new_config(tmp_path):
     config = yaml.safe_load((tmp_path / ".kb" / "config.yaml").read_text(encoding="utf-8"))
 
     assert config["hooks"]["session_start_ingest"] is True
+
+
+def test_initialize_data_dir_writes_revised_preamble(tmp_path):
+    initialize_data_dir(tmp_path)
+
+    preamble = (tmp_path / "PREAMBLE.md").read_text(encoding="utf-8")
+
+    assert preamble == render_preamble(tmp_path)
+    assert "kb context" in preamble
+    assert "kb explore" in preamble
+    assert str(tmp_path) in preamble
+
+
+def test_initialize_data_dir_hooks_refreshes_only_managed_preamble(tmp_path):
+    initialize_data_dir(tmp_path)
+    preamble_path = tmp_path / "PREAMBLE.md"
+    preamble_path.write_text(LEGACY_PREAMBLE_CONTENT, encoding="utf-8")
+
+    first = initialize_data_dir(tmp_path, hooks=True)
+    second = initialize_data_dir(tmp_path, hooks=True)
+
+    assert preamble_path in first
+    assert preamble_path.read_text(encoding="utf-8") == render_preamble(tmp_path)
+    assert second == []
+
+
+def test_initialize_data_dir_hooks_preserves_user_preamble(tmp_path):
+    initialize_data_dir(tmp_path)
+    preamble_path = tmp_path / "PREAMBLE.md"
+    user_preamble = "# Custom Preamble\n\nDo not overwrite.\n"
+    preamble_path.write_text(user_preamble, encoding="utf-8")
+
+    created = initialize_data_dir(tmp_path, hooks=True)
+
+    assert created == []
+    assert preamble_path.read_text(encoding="utf-8") == user_preamble

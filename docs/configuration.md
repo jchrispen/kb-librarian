@@ -134,11 +134,11 @@ Useful ingest settings:
 
 ## Hooks Flag
 
-`kb init --hooks` only affects newly created config by setting:
+For newly created KBs, `kb init --hooks` sets:
 
 ```yaml
 hooks:
   session_start_ingest: true
 ```
 
-In the current shipped CLI, this records intent in config. It does not install external hooks or automation.
+It also creates or refreshes the tool-managed `PREAMBLE.md` and prints instructions for including it in agent session instructions. It does not install external hooks, edit external agent configuration files, or enable automation.
