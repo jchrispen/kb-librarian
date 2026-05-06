@@ -16,7 +16,7 @@ Phase 2 assumes Phase 1 is complete and should preserve all existing note files,
 | [02b - Actionable Review Workflow](02b-actionable-review-workflow.md) | Complete | Added explain/accept/reject/defer commands, state transitions with defer-until visibility, and actionable review mutation flows with tests. |
 | [02c - Explore and Citation Surfaces](02c-explore-and-citation-surfaces.md) | Complete | Added `kb explore`, broad-recall exploration synthesis, default context/explore citation blocks, optional search citation blocks, and structured citation JSON fields. |
 | [02d - Usage and Search-Miss Feedback](02d-usage-and-search-miss-feedback.md) | Complete | Added structured usage logging, `kb log-use`, `kb usage`, search-miss logging, and miss promotion into review. |
-| [02e - Preamble Install, Ingest Reports, and Session Proof](02e-preamble-ingest-reports-and-session-proof.md) | Next | Adds `kb init --hooks`, revised `PREAMBLE.md`, ingest report polish, and end-to-end normal-session verification. |
+| [02e - Preamble Install, Ingest Reports, and Session Proof](02e-preamble-ingest-reports-and-session-proof.md) | Complete | Added `kb init --hooks`, revised `PREAMBLE.md`, ingest report polish, JSON reports, and end-to-end normal-session verification. |
 
 ## Milestone Order
 
@@ -28,7 +28,7 @@ Phase 2 assumes Phase 1 is complete and should preserve all existing note files,
    - Adds broad-recall ideation retrieval and citation-ready output for agent-facing commands.
 4. [02d - Usage and Search-Miss Feedback](02d-usage-and-search-miss-feedback.md) - complete
    - Records retrieval/use signals and turns repeated misses into reviewable improvement work.
-5. [02e - Preamble Install, Ingest Reports, and Session Proof](02e-preamble-ingest-reports-and-session-proof.md) - next
+5. [02e - Preamble Install, Ingest Reports, and Session Proof](02e-preamble-ingest-reports-and-session-proof.md) - complete
    - Finishes normal-session ergonomics with installable agent guidance, better ingest summaries, and a phase-level proof run.
 
 Each milestone should leave the CLI runnable and covered by focused tests. Later milestones may adjust earlier code, but they should preserve accepted Phase 1 behavior and the public interfaces already shipped in earlier Phase 2 milestones.
