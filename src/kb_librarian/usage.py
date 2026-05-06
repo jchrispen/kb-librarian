@@ -96,6 +96,29 @@ def log_note_use(
     return record
 
 
+def log_suspect_flag(
+    data_dir: Path,
+    *,
+    note_id: str,
+    reason: str,
+    task: str | None = None,
+    timestamp: str | None = None,
+) -> dict[str, Any]:
+    """Append one suspect-note signal for hygiene workflows."""
+
+    record = {
+        "schema_version": SCHEMA_VERSION,
+        "event": "suspect-flag",
+        "timestamp": timestamp or _now_iso(),
+        "note_id": note_id,
+        "reason": reason.strip(),
+        "task": task,
+    }
+    _append_jsonl(data_dir / USAGE_LOG, record)
+    refresh_usage_stats(data_dir)
+    return record
+
+
 def maybe_log_search_miss(
     data_dir: Path,
     *,
@@ -204,6 +227,7 @@ def summarize_usage(
 
     retrieval_events: list[dict[str, Any]] = []
     note_use_events: list[dict[str, Any]] = []
+    suspect_events: list[dict[str, Any]] = []
     for event in events:
         if event.get("event") == "retrieval":
             if note_id is None or note_id in _returned_note_ids(event):
@@ -212,6 +236,10 @@ def summarize_usage(
         if event.get("event") == "note-use":
             if note_id is None or event.get("note_id") == note_id:
                 note_use_events.append(event)
+            continue
+        if event.get("event") == "suspect-flag":
+            if note_id is None or event.get("note_id") == note_id:
+                suspect_events.append(event)
 
     retrieved_counter: Counter[str] = Counter()
     command_counter: Counter[str] = Counter()
@@ -244,7 +272,17 @@ def summarize_usage(
         retrievals_by_command=_sorted_counter(command_counter),
         retrieved_notes=_sorted_counter(retrieved_counter),
         used_notes=_sorted_counter(used_counter),
-        suspect_flags=[],
+        suspect_flags=[
+            "{note_id}: {reason} ({timestamp})".format(
+                note_id=str(event.get("note_id") or "unknown"),
+                reason=str(event.get("reason") or "no reason"),
+                timestamp=str(event.get("timestamp") or "unknown"),
+            )
+            for event in sorted(
+                suspect_events,
+                key=lambda item: str(item.get("timestamp") or ""),
+            )[-10:]
+        ],
     )
 
 
@@ -335,6 +373,7 @@ def usage_stats_payload(data_dir: Path) -> dict[str, Any]:
     miss_events = read_search_miss_events(data_dir)
     retrievals = [event for event in events if event.get("event") == "retrieval"]
     logged_uses = [event for event in events if event.get("event") == "note-use"]
+    suspect_flags = [event for event in events if event.get("event") == "suspect-flag"]
     command_counter: Counter[str] = Counter(
         str(event.get("command") or "unknown") for event in retrievals
     )
@@ -346,6 +385,7 @@ def usage_stats_payload(data_dir: Path) -> dict[str, Any]:
     return {
         "retrievals": len(retrievals),
         "logged_uses": len(logged_uses),
+        "suspect_flags": len(suspect_flags),
         "search_misses": len(miss_events),
         "retrievals_by_command": dict(sorted(command_counter.items())),
         "last_event_at": last_seen or None,

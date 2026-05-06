@@ -23,7 +23,10 @@ REVIEW_QUEUE_FILES = (
     "review/pending-merge.md",
     "review/pending-compaction.md",
     "review/disputes.md",
+    "review/stale.md",
+    "review/orphans.md",
     "review/search-misses.md",
+    "review/low-utility.md",
 )
 
 REVIEW_STATE_FILE = "review/review-items.json"

@@ -33,7 +33,10 @@ REVIEW_FILE_CONTENT = {
     "review/pending-merge.md": "# Pending Merge\n\n",
     "review/pending-compaction.md": "# Pending Compaction\n\n",
     "review/disputes.md": "# Disputes\n\n",
+    "review/stale.md": "# Stale Notes\n\n",
+    "review/orphans.md": "# Orphan Notes\n\n",
     "review/search-misses.md": "# Search Misses\n\n",
+    "review/low-utility.md": "# Low Utility\n\n",
 }
 
 

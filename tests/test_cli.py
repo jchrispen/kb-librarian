@@ -164,6 +164,7 @@ def test_kb_reindex_scan_clusters_and_compact_smoke(tmp_path):
     scan_result = run_cli("reindex", "--scan-clusters", "--data-dir", str(tmp_path))
     assert scan_result.returncode == 0
     assert "Compaction scan: 1 cluster(s), 1 new review item(s)." in scan_result.stdout
+    assert "Hygiene scan:" in scan_result.stdout
 
     rendered = (tmp_path / "review" / "pending-compaction.md").read_text(encoding="utf-8")
     match = re.search(r"cluster_id: (cluster-[a-f0-9]+)", rendered)
@@ -418,6 +419,51 @@ def test_kb_log_use_and_usage_smoke(tmp_path):
     assert events[0]["command"] == "search"
     assert events[0]["returned_note_ids"] == [note_id]
     assert "Prefer logging note usage" not in json.dumps(events)
+
+
+def test_kb_flag_suspect_smoke(tmp_path):
+    init_result = run_cli("init", "--data-dir", str(tmp_path))
+    assert init_result.returncode == 0
+
+    source = tmp_path / "seed.md"
+    source.write_text(
+        "# Flag suspect example\n\nThis note may be stale or incorrect.\n",
+        encoding="utf-8",
+    )
+    add_result = run_cli(
+        "add",
+        "--data-dir",
+        str(tmp_path),
+        "--topic",
+        "agent-systems",
+        "--type",
+        "fact",
+        "--from-file",
+        str(source),
+    )
+    match = NOTE_ID_PATTERN.search(add_result.stdout)
+    assert match is not None
+    note_id = match.group(1)
+
+    first = run_cli("flag-suspect", note_id, "not useful in retrieval", "--data-dir", str(tmp_path))
+    second = run_cli("flag-suspect", note_id, "not useful in retrieval", "--data-dir", str(tmp_path))
+    dispute = run_cli("flag-suspect", note_id, "contradicts observed behavior", "--data-dir", str(tmp_path))
+
+    assert first.returncode == 0
+    assert "queue=low_utility" in first.stdout
+    assert second.returncode == 0
+    assert "review_item=" in second.stdout
+    assert dispute.returncode == 0
+    assert "queue=dispute" in dispute.stdout
+
+    usage_events = [
+        json.loads(line)
+        for line in (tmp_path / ".kb" / "usage.log").read_text(encoding="utf-8").splitlines()
+    ]
+    suspect_events = [event for event in usage_events if event.get("event") == "suspect-flag"]
+    assert len(suspect_events) == 3
+    assert all(event["note_id"] == note_id for event in suspect_events)
+    assert "not useful in retrieval" in (tmp_path / "review" / "low-utility.md").read_text(encoding="utf-8")
 
 
 def test_kb_search_misses_promote_to_review_smoke(tmp_path):

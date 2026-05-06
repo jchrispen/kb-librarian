@@ -19,6 +19,7 @@ from kb_librarian.errors import (
     NoteNotFoundError,
     NoteValidationError,
 )
+from kb_librarian.hygiene import flag_suspect_note
 from kb_librarian.indexing import ReindexResult, reindex_data_dir
 from kb_librarian.init import initialize_data_dir, render_preamble_guidance
 from kb_librarian.ingest import ingest, ingest_report_payload, render_report
@@ -67,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_context_parser(subcommands)
     _add_explore_parser(subcommands)
     _add_log_use_parser(subcommands)
+    _add_flag_suspect_parser(subcommands)
     _add_usage_parser(subcommands)
     return parser
 
@@ -273,6 +275,18 @@ def _add_usage_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentP
     parser.add_argument("--note", help="Filter usage summary to one note ID.")
     parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
     parser.set_defaults(handler=_handle_usage)
+
+
+def _add_flag_suspect_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subcommands.add_parser(
+        "flag-suspect",
+        help="Flag a note as suspect with a short reason.",
+        description="Append a suspect signal and upsert a low-utility or dispute review item.",
+    )
+    parser.add_argument("id", help="Note ID that appears suspect.")
+    parser.add_argument("reason", help="Short reason describing the issue.")
+    parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
+    parser.set_defaults(handler=_handle_flag_suspect)
 
 
 def _handle_init(args: argparse.Namespace) -> int:
@@ -758,6 +772,23 @@ def _handle_usage(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_flag_suspect(args: argparse.Namespace) -> int:
+    data_dir = resolve_data_dir(args.data_dir)
+    initialize_data_dir(data_dir)
+    note_id = str(args.id).strip()
+    _require_note_id(data_dir, note_id)
+    reason = str(args.reason).strip()
+    if not reason:
+        raise KBLibrarianError("flag-suspect requires a non-empty reason.")
+
+    result = flag_suspect_note(data_dir, note_id=note_id, reason=reason)
+    if result.created_or_updated:
+        print(f"Flagged suspect note {note_id}; queue={result.queue}; review_item={result.item_id}.")
+    else:
+        print(f"Recorded suspect flag for note {note_id}; existing review item remains {result.item_id}.")
+    return 0
+
+
 def _read_add_input(from_file: str | None) -> tuple[str, str]:
     if from_file:
         path = Path(from_file).expanduser()
@@ -992,6 +1023,25 @@ def _print_reindex_result(result: ReindexResult) -> None:
         if result.compaction_review_items:
             print("compaction_review_item_ids:")
             for item_id in result.compaction_review_items:
+                print(f"- {item_id}")
+        stale = len(result.stale_review_items or [])
+        orphan = len(result.orphan_review_items or [])
+        low_utility = len(result.low_utility_review_items or [])
+        print(
+            "Hygiene scan: "
+            f"stale={stale}, orphan={orphan}, low_utility={low_utility} updated item(s)."
+        )
+        if result.stale_review_items:
+            print("stale_review_item_ids:")
+            for item_id in result.stale_review_items:
+                print(f"- {item_id}")
+        if result.orphan_review_items:
+            print("orphan_review_item_ids:")
+            for item_id in result.orphan_review_items:
+                print(f"- {item_id}")
+        if result.low_utility_review_items:
+            print("low_utility_review_item_ids:")
+            for item_id in result.low_utility_review_items:
                 print(f"- {item_id}")
     for artifact in result.artifacts:
         print(str(artifact))

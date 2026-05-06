@@ -92,6 +92,36 @@ QUEUE_DEFINITIONS: dict[str, QueueDefinition] = {
         proposed_action="draft or review compaction proposal",
         order=45,
     ),
+    "stale": QueueDefinition(
+        queue="stale",
+        count_key="stale",
+        id_prefix="stale",
+        file_name="stale.md",
+        file_title="Stale Notes",
+        priority="medium",
+        proposed_action="reverify or refresh note",
+        order=47,
+    ),
+    "orphan": QueueDefinition(
+        queue="orphan",
+        count_key="orphan",
+        id_prefix="orphan",
+        file_name="orphans.md",
+        file_title="Orphan Notes",
+        priority="medium",
+        proposed_action="link, merge, retopic, archive, or keep with rationale",
+        order=48,
+    ),
+    "low_utility": QueueDefinition(
+        queue="low_utility",
+        count_key="low_utility",
+        id_prefix="lowutility",
+        file_name="low-utility.md",
+        file_title="Low Utility",
+        priority="medium",
+        proposed_action="improve note utility or resolve disputed signal",
+        order=49,
+    ),
     "duplicate": QueueDefinition(
         queue="duplicate",
         count_key="duplicate",
@@ -269,6 +299,92 @@ def upsert_search_miss_review_item(
                 "at": datetime.now().isoformat(timespec="seconds"),
                 "action": "created",
                 "source": ".kb/search-misses.log",
+            }
+        ],
+        fingerprint=fingerprint,
+    )
+    _write_state(review_state_path(data_dir), state)
+    render_review_queues(data_dir, state=state)
+    return item_id
+
+
+def upsert_hygiene_review_item(
+    data_dir: Path,
+    *,
+    queue: str,
+    title: str,
+    target_notes: list[str],
+    payload: Mapping[str, Any],
+    priority: str,
+    created: str,
+    fingerprint: str,
+    source: str,
+    return_existing: bool = False,
+) -> str | None:
+    """Create or refresh a stale/orphan/low-utility item keyed by fingerprint."""
+
+    definition = _definition(queue)
+    payload_dict = dict(payload)
+    state = ensure_review_state(data_dir, render=False)
+    existing = _find_existing_item(state, fingerprint)
+    if existing is not None:
+        existing_payload = existing.get("payload") if isinstance(existing.get("payload"), dict) else {}
+        existing_clean = dict(existing_payload) if isinstance(existing_payload, dict) else {}
+        existing_clean.pop("fingerprint", None)
+        incoming_clean = dict(payload_dict)
+
+        changed = (
+            existing_clean != incoming_clean
+            or str(existing.get("title", "")) != (title.strip() or str(existing.get("title", "")))
+            or sorted(str(note_id) for note_id in existing.get("target_notes", []) if str(note_id).strip())
+            != sorted(str(note_id) for note_id in target_notes if str(note_id).strip())
+            or str(existing.get("priority")) != priority
+        )
+        if not changed:
+            return str(existing["id"]) if return_existing else None
+
+        status = str(existing.get("status"))
+        if status in RESOLVED_STATUSES:
+            existing["status"] = "pending"
+            action = "reopened"
+        else:
+            action = "updated"
+
+        existing["title"] = title.strip() or str(existing.get("title", "(untitled review item)"))
+        existing["priority"] = priority
+        existing["target_notes"] = sorted({str(note_id) for note_id in target_notes if str(note_id).strip()})
+        existing["proposed_action"] = definition.proposed_action
+        existing["payload"] = {**payload_dict, "fingerprint": fingerprint}
+        existing["updated"] = date.today().isoformat()
+        history = existing.get("history")
+        if not isinstance(history, list):
+            history = []
+            existing["history"] = history
+        history.append(
+            {
+                "at": datetime.now().isoformat(timespec="seconds"),
+                "action": action,
+                "source": source,
+            }
+        )
+        _write_state(review_state_path(data_dir), state)
+        render_review_queues(data_dir, state=state)
+        return str(existing["id"])
+
+    item_id = _append_item(
+        state,
+        queue=queue,
+        title=title,
+        target_notes=target_notes,
+        proposed_action=definition.proposed_action,
+        payload={**payload_dict, "fingerprint": fingerprint},
+        priority=priority,
+        created=created,
+        history=[
+            {
+                "at": datetime.now().isoformat(timespec="seconds"),
+                "action": "created",
+                "source": source,
             }
         ],
         fingerprint=fingerprint,
@@ -687,6 +803,9 @@ def render_review_summary(
         f"dispute: {counts.get('dispute', 0)}",
         f"searchmiss: {counts.get('searchmiss', 0)}",
         f"compaction: {counts.get('compaction', 0)}",
+        f"stale: {counts.get('stale', 0)}",
+        f"orphan: {counts.get('orphan', 0)}",
+        f"low_utility: {counts.get('low_utility', 0)}",
         f"duplicate: {counts.get('duplicate', 0)}",
         f"unsupported_file: {counts.get('unsupported_file', 0)}",
     ]
@@ -1132,6 +1251,53 @@ def _render_item_markdown(item: Mapping[str, Any]) -> list[str]:
         body = payload.get("body")
         if isinstance(body, str) and body.strip():
             lines.extend(["- proposed_body:", "```markdown", body.rstrip("\n"), "```"])
+    elif queue == "stale":
+        _extend_if_present(lines, "- note_id", payload.get("note_id"))
+        _extend_if_present(lines, "- updated", payload.get("updated"))
+        _extend_if_present(lines, "- stale_after_days", payload.get("stale_after_days"))
+        _extend_if_present(lines, "- age_days", payload.get("age_days"))
+        _extend_if_present(lines, "- knowledge_type", payload.get("knowledge_type"))
+        _extend_if_present(lines, "- staleness_risk", payload.get("staleness_risk"))
+        _extend_if_present(lines, "- confidence", payload.get("confidence"))
+        _extend_if_present(lines, "- status", payload.get("status"))
+        _extend_if_present(lines, "- source_quality", payload.get("source_quality"))
+        _extend_if_present(lines, "- reason", payload.get("reason"))
+        evidence = payload.get("evidence")
+        if isinstance(evidence, list) and evidence:
+            lines.append("- evidence:")
+            lines.extend(f"  - {entry}" for entry in evidence[:10])
+    elif queue == "orphan":
+        _extend_if_present(lines, "- note_id", payload.get("note_id"))
+        _extend_if_present(lines, "- updated", payload.get("updated"))
+        _extend_if_present(lines, "- orphan_after_days", payload.get("orphan_after_days"))
+        _extend_if_present(lines, "- age_days", payload.get("age_days"))
+        _extend_if_present(lines, "- inbound_backlinks", payload.get("inbound_backlinks"))
+        _extend_if_present(lines, "- outbound_refs", payload.get("outbound_refs"))
+        _extend_if_present(lines, "- recent_retrievals", payload.get("recent_retrievals"))
+        _extend_if_present(lines, "- recent_uses", payload.get("recent_uses"))
+        _extend_if_present(lines, "- topic_neighbors", payload.get("topic_neighbors"))
+        _extend_if_present(lines, "- reason", payload.get("reason"))
+        suggested_actions = payload.get("suggested_actions")
+        if isinstance(suggested_actions, list) and suggested_actions:
+            lines.append("- suggested_actions:")
+            lines.extend(f"  - {action}" for action in suggested_actions[:10])
+    elif queue == "low_utility":
+        _extend_if_present(lines, "- note_id", payload.get("note_id"))
+        _extend_if_present(lines, "- retrievals", payload.get("retrievals"))
+        _extend_if_present(lines, "- logged_uses", payload.get("logged_uses"))
+        _extend_if_present(lines, "- use_ratio", payload.get("use_ratio"))
+        _extend_if_present(lines, "- suspect_count", payload.get("suspect_count"))
+        _extend_if_present(lines, "- correction_count", payload.get("correction_count"))
+        _extend_if_present(lines, "- weak_retrievals", payload.get("weak_retrievals"))
+        _extend_if_present(lines, "- reason", payload.get("reason"))
+        reasons = payload.get("reasons")
+        if isinstance(reasons, list) and reasons:
+            lines.append("- reasons:")
+            lines.extend(f"  - {entry}" for entry in reasons[:12])
+        evidence = payload.get("evidence")
+        if isinstance(evidence, list) and evidence:
+            lines.append("- evidence:")
+            lines.extend(f"  - {entry}" for entry in evidence[:10])
 
     lines.extend(["", ""])
     return lines

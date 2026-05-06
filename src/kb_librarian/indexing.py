@@ -21,6 +21,9 @@ class ReindexResult:
     index_backend: str
     compaction_clusters: int = 0
     compaction_review_items: list[str] | None = None
+    stale_review_items: list[str] | None = None
+    orphan_review_items: list[str] | None = None
+    low_utility_review_items: list[str] | None = None
 
 
 def reindex_data_dir(
@@ -72,14 +75,22 @@ def reindex_data_dir(
 
     compaction_clusters = 0
     compaction_review_items: list[str] = []
+    stale_review_items: list[str] = []
+    orphan_review_items: list[str] = []
+    low_utility_review_items: list[str] = []
     if scan_clusters:
         if config is None:
             raise ValueError("config is required when scan_clusters=True")
         from kb_librarian.compaction import scan_compaction_clusters
+        from kb_librarian.hygiene import scan_hygiene_queues
 
         scan = scan_compaction_clusters(data_dir, config=config)
         compaction_clusters = len(scan.clusters)
         compaction_review_items = scan.review_item_ids
+        hygiene = scan_hygiene_queues(data_dir, config=config)
+        stale_review_items = hygiene.stale_item_ids
+        orphan_review_items = hygiene.orphan_item_ids
+        low_utility_review_items = hygiene.low_utility_item_ids
 
     return ReindexResult(
         artifacts=artifacts,
@@ -88,6 +99,9 @@ def reindex_data_dir(
         index_backend=backend,
         compaction_clusters=compaction_clusters,
         compaction_review_items=compaction_review_items,
+        stale_review_items=stale_review_items,
+        orphan_review_items=orphan_review_items,
+        low_utility_review_items=low_utility_review_items,
     )
 
 

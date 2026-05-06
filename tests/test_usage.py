@@ -6,6 +6,7 @@ from datetime import datetime
 from kb_librarian.init import initialize_data_dir
 from kb_librarian.review import review_state_path
 from kb_librarian.usage import (
+    log_suspect_flag,
     log_note_use,
     log_retrieval,
     log_search_miss,
@@ -170,3 +171,28 @@ def test_reported_poor_result_promotes_immediately(tmp_path):
     assert item["priority"] == "high"
     assert item["payload"]["high_value"] is True
     assert item["payload"]["reasons"] == {"reported-poor-result": 1}
+
+
+def test_usage_summary_and_stats_include_suspect_flags(tmp_path):
+    initialize_data_dir(tmp_path)
+    log_retrieval(
+        tmp_path,
+        command="search",
+        query="agent context",
+        returned_note_ids=["2026-05-06-agent-context"],
+        result_count=1,
+        timestamp="2026-05-06T09:00:00",
+    )
+    log_suspect_flag(
+        tmp_path,
+        note_id="2026-05-06-agent-context",
+        reason="outdated recommendation",
+        timestamp="2026-05-06T09:01:00",
+    )
+
+    summary = summarize_usage(tmp_path)
+    assert summary.suspect_flags
+    assert "outdated recommendation" in summary.suspect_flags[0]
+
+    stats = json.loads((tmp_path / ".kb" / "stats.json").read_text(encoding="utf-8"))
+    assert stats["usage"]["suspect_flags"] == 1
