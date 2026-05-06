@@ -6,11 +6,19 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from kb_librarian.errors import KBLibrarianError
+from kb_librarian.notes import KNOWLEDGE_TYPES, Note, body_template, generate_note_id, read_note, write_note
+from kb_librarian.storage import (
+    canonical_note_path,
+    ensure_topic_layout,
+    ensure_unique_note_ids,
+    existing_note_ids,
+    load_note_records,
+)
 
 
 STATE_VERSION = 1
@@ -102,6 +110,14 @@ class ReviewSummaryItem:
     kind: str
     item_id: str
     summary: str
+
+
+@dataclass(frozen=True)
+class ReviewMutationResult:
+    item_id: str
+    action: str
+    changed: bool
+    message: str
 
 
 class ReviewStateError(KBLibrarianError):
@@ -247,6 +263,143 @@ def queue_unsupported_file_review_item(data_dir: Path, *, source_path: Path) -> 
     )
 
 
+def explain_review_item(data_dir: Path, item_id: str) -> str:
+    state = ensure_review_state(data_dir, render=True)
+    item = _find_item_by_id(state, item_id)
+    note_paths = _target_note_paths(data_dir, item)
+    payload = item.get("payload", {})
+    payload_text = json.dumps(payload, indent=2, sort_keys=True)
+    lines = [
+        f"Review item: {item['id']}",
+        f"queue: {item['queue']}",
+        f"status: {item['status']}",
+        f"priority: {item['priority']}",
+        f"created: {item['created']}",
+        f"updated: {item['updated']}",
+    ]
+    defer_until = item.get("defer_until")
+    if isinstance(defer_until, str) and defer_until.strip():
+        lines.append(f"defer_until: {defer_until}")
+    lines.append(f"proposed_action: {item['proposed_action']}")
+    lines.append(f"title: {item['title']}")
+    lines.append("target_notes:")
+    if note_paths:
+        lines.extend([f"- {entry}" for entry in note_paths])
+    else:
+        lines.append("- (none)")
+    lines.extend(
+        [
+            "",
+            "payload:",
+            payload_text,
+            "",
+            "history:",
+        ]
+    )
+    history = item.get("history", [])
+    if isinstance(history, list) and history:
+        for entry in history:
+            lines.append(f"- {json.dumps(entry, sort_keys=True)}")
+    else:
+        lines.append("- (none)")
+    return "\n".join(lines) + "\n"
+
+
+def accept_review_item(
+    data_dir: Path,
+    item_id: str,
+    *,
+    topic: str | None = None,
+    knowledge_type: str | None = None,
+    note_id: str | None = None,
+    append_body: bool = False,
+    resolution_note: str | None = None,
+) -> ReviewMutationResult:
+    state = ensure_review_state(data_dir, render=False)
+    item = _find_item_by_id(state, item_id)
+    status = str(item["status"])
+    if status == "accepted":
+        return ReviewMutationResult(item_id=item_id, action="accept", changed=False, message="Review item already accepted.")
+    if status == "rejected":
+        raise ReviewStateError(f"Review item {item_id} is rejected and cannot be accepted.")
+
+    message = _apply_accept_action(
+        data_dir,
+        item,
+        topic=topic,
+        knowledge_type=knowledge_type,
+        note_id=note_id,
+        append_body=append_body,
+        resolution_note=resolution_note,
+    )
+    _transition_item(
+        item,
+        to_status="accepted",
+        action="accepted",
+        note=message,
+    )
+    _write_state(review_state_path(data_dir), state)
+    render_review_queues(data_dir, state=state)
+    return ReviewMutationResult(item_id=item_id, action="accept", changed=True, message=message)
+
+
+def reject_review_item(data_dir: Path, item_id: str, *, reason: str | None = None) -> ReviewMutationResult:
+    state = ensure_review_state(data_dir, render=False)
+    item = _find_item_by_id(state, item_id)
+    status = str(item["status"])
+    if status == "rejected":
+        return ReviewMutationResult(item_id=item_id, action="reject", changed=False, message="Review item already rejected.")
+    if status == "accepted":
+        raise ReviewStateError(f"Review item {item_id} is accepted and cannot be rejected.")
+
+    _transition_item(
+        item,
+        to_status="rejected",
+        action="rejected",
+        note=reason or "Rejected via CLI review command.",
+    )
+    _write_state(review_state_path(data_dir), state)
+    render_review_queues(data_dir, state=state)
+    return ReviewMutationResult(
+        item_id=item_id,
+        action="reject",
+        changed=True,
+        message=reason or "Review item rejected.",
+    )
+
+
+def defer_review_item(data_dir: Path, item_id: str, *, days: int) -> ReviewMutationResult:
+    if days <= 0:
+        raise ReviewStateError("--days must be a positive integer.")
+    state = ensure_review_state(data_dir, render=False)
+    item = _find_item_by_id(state, item_id)
+    status = str(item["status"])
+    if status == "accepted":
+        raise ReviewStateError(f"Review item {item_id} is accepted and cannot be deferred.")
+    if status == "rejected":
+        raise ReviewStateError(f"Review item {item_id} is rejected and cannot be deferred.")
+
+    due = (date.today() + timedelta(days=days)).isoformat()
+    if status == "deferred" and str(item.get("defer_until", "")) == due:
+        return ReviewMutationResult(
+            item_id=item_id,
+            action="defer",
+            changed=False,
+            message=f"Review item already deferred until {due}.",
+        )
+
+    _transition_item(
+        item,
+        to_status="deferred",
+        action="deferred",
+        note=f"Deferred for {days} day(s).",
+        defer_until=due,
+    )
+    _write_state(review_state_path(data_dir), state)
+    render_review_queues(data_dir, state=state)
+    return ReviewMutationResult(item_id=item_id, action="defer", changed=True, message=f"Deferred until {due}.")
+
+
 def validate_review_item(item: Mapping[str, Any]) -> None:
     required = {
         "id",
@@ -282,6 +435,9 @@ def validate_review_item(item: Mapping[str, Any]) -> None:
     for key in ("id", "title", "created", "updated", "proposed_action"):
         if not isinstance(item.get(key), str):
             raise ReviewStateError(f"Review item {key} must be a string.")
+    defer_until = item.get("defer_until")
+    if defer_until is not None and not isinstance(defer_until, str):
+        raise ReviewStateError("Review item defer_until must be an ISO date string when present.")
 
 
 def render_review_queues(data_dir: Path, *, state: Mapping[str, Any] | None = None) -> None:
@@ -293,21 +449,27 @@ def render_review_queues(data_dir: Path, *, state: Mapping[str, Any] | None = No
         queue_items = [
             item
             for item in items
-            if item["queue"] == definition.queue and str(item["status"]) in PENDING_STATUSES
+            if item["queue"] == definition.queue and _is_visible_pending_item(item)
         ]
         text = _render_queue_file(definition, sorted(queue_items, key=_queue_file_sort_key))
         path = data_dir / "review" / definition.file_name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
+    _render_rejected_items(data_dir, items)
 
 
 def collect_review_summary(
     data_dir: Path,
     *,
     max_items: int,
+    include_deferred: bool = False,
 ) -> tuple[dict[str, int], list[ReviewSummaryItem]]:
     state = ensure_review_state(data_dir, render=True)
-    pending = [item for item in _state_items(state) if str(item["status"]) in PENDING_STATUSES]
+    pending = [
+        item
+        for item in _state_items(state)
+        if _is_visible_pending_item(item, include_deferred=include_deferred)
+    ]
     counts = {definition.count_key: 0 for definition in QUEUE_DEFINITIONS.values()}
     for item in pending:
         definition = _definition(str(item["queue"]))
@@ -342,6 +504,8 @@ def render_review_summary(
         lines.extend(["", f"Showing up to {max_items} items:"])
         for item in materialized:
             lines.append(f"- [{item.kind}] {item.item_id} - {item.summary}")
+        suggested = min(3, len(materialized))
+        lines.extend(["", f"Suggested time: choose {suggested} item(s) now."])
     return "\n".join(lines) + "\n"
 
 
@@ -803,3 +967,380 @@ def _relative_path(data_dir: Path, path: Path) -> str:
         return path.relative_to(data_dir).as_posix()
     except ValueError:
         return path.as_posix()
+
+
+def _find_item_by_id(state: Mapping[str, Any], item_id: str) -> dict[str, Any]:
+    for item in _state_items(state):
+        if str(item.get("id")) == item_id:
+            return item
+    raise ReviewStateError(f"Unknown review item ID: {item_id}")
+
+
+def _target_note_paths(data_dir: Path, item: Mapping[str, Any]) -> list[str]:
+    by_id = {record.note_id: record.path for record in load_note_records(data_dir, validate=True)}
+    note_ids = item.get("target_notes", [])
+    if not isinstance(note_ids, list):
+        return []
+    rendered: list[str] = []
+    for note_id in note_ids:
+        text_id = str(note_id)
+        path = by_id.get(text_id)
+        rendered.append(f"{text_id} -> {path.as_posix()}" if path else f"{text_id} -> (missing)")
+    return rendered
+
+
+def _transition_item(
+    item: dict[str, Any],
+    *,
+    to_status: str,
+    action: str,
+    note: str,
+    defer_until: str | None = None,
+) -> None:
+    now = datetime.now().isoformat(timespec="seconds")
+    item["status"] = to_status
+    item["updated"] = date.today().isoformat()
+    if defer_until:
+        item["defer_until"] = defer_until
+    else:
+        item.pop("defer_until", None)
+
+    history = item.get("history")
+    if not isinstance(history, list):
+        history = []
+        item["history"] = history
+    history.append(
+        {
+            "at": now,
+            "action": action,
+            "source": "cli",
+            "note": note,
+        }
+    )
+
+
+def _is_visible_pending_item(item: Mapping[str, Any], *, include_deferred: bool = False) -> bool:
+    status = str(item.get("status"))
+    if status == "pending":
+        return True
+    if status != "deferred":
+        return False
+    if include_deferred:
+        return True
+    due = str(item.get("defer_until", "")).strip()
+    if not due:
+        return True
+    return _date_part(due) <= date.today().isoformat()
+
+
+def _render_rejected_items(data_dir: Path, items: Iterable[Mapping[str, Any]]) -> None:
+    rejected_dir = data_dir / "review" / "rejected"
+    rejected_dir.mkdir(parents=True, exist_ok=True)
+    expected: set[str] = set()
+    for item in items:
+        if str(item.get("status")) != "rejected":
+            continue
+        item_id = str(item.get("id", "")).strip()
+        if not item_id:
+            continue
+        expected.add(f"{item_id}.md")
+        text = "\n".join(_render_item_markdown(item)).rstrip() + "\n"
+        (rejected_dir / f"{item_id}.md").write_text(text, encoding="utf-8")
+
+    for path in rejected_dir.glob("*.md"):
+        if path.name not in expected:
+            path.unlink()
+
+
+def _apply_accept_action(
+    data_dir: Path,
+    item: dict[str, Any],
+    *,
+    topic: str | None,
+    knowledge_type: str | None,
+    note_id: str | None,
+    append_body: bool,
+    resolution_note: str | None,
+) -> str:
+    queue = str(item["queue"])
+    if queue == "classification":
+        return _accept_classification_item(
+            data_dir,
+            item,
+            topic=topic,
+            knowledge_type=knowledge_type,
+            note_id=note_id,
+        )
+    if queue == "merge":
+        return _accept_merge_item(data_dir, item, append_body=append_body)
+    if queue == "dispute":
+        return _accept_dispute_item(data_dir, item)
+    if queue == "searchmiss":
+        return _accept_searchmiss_item(item, resolution_note=resolution_note)
+    raise ReviewStateError(
+        f"Accept is not supported for queue {queue!r} in this milestone. Use reject/defer instead."
+    )
+
+
+def _accept_classification_item(
+    data_dir: Path,
+    item: dict[str, Any],
+    *,
+    topic: str | None,
+    knowledge_type: str | None,
+    note_id: str | None,
+) -> str:
+    payload = item.get("payload", {})
+    source_path = str(payload.get("source", "")).strip() if isinstance(payload, dict) else ""
+    source_hash = str(payload.get("source_hash", "")).strip() if isinstance(payload, dict) else ""
+
+    if note_id:
+        appended = _append_source_by_note_id(
+            data_dir,
+            note_id=note_id,
+            source_path=source_path,
+            source_hash=source_hash,
+        )
+        if appended:
+            return f"Accepted by appending source to note {note_id}."
+        return f"Accepted; source already present on note {note_id}."
+
+    selected_topic = (topic or "").strip()
+    selected_type = (knowledge_type or "").strip()
+    if not selected_topic:
+        raise ReviewStateError("classification accept requires --topic when --note-id is not supplied.")
+    if selected_type not in KNOWLEDGE_TYPES:
+        allowed = ", ".join(sorted(KNOWLEDGE_TYPES))
+        raise ReviewStateError(f"classification accept requires --type in: {allowed}")
+
+    note_id_created = _create_note_from_classification(
+        data_dir,
+        payload=payload if isinstance(payload, dict) else {},
+        topic=selected_topic,
+        knowledge_type=selected_type,
+    )
+    return f"Accepted by creating note {note_id_created} in topic {selected_topic}."
+
+
+def _accept_merge_item(data_dir: Path, item: dict[str, Any], *, append_body: bool) -> str:
+    if not append_body:
+        raise ReviewStateError("merge accept requires --append-body to apply candidate body text.")
+    payload = item.get("payload", {})
+    if not isinstance(payload, dict):
+        payload = {}
+    candidate_body = str(payload.get("candidate_body", "")).strip()
+    if not candidate_body:
+        raise ReviewStateError("merge accept cannot proceed because candidate body is missing from review payload.")
+    source_path = str(payload.get("source", "")).strip()
+    source_hash = str(payload.get("source_hash", "")).strip()
+
+    records = load_note_records(data_dir, validate=True)
+    ensure_unique_note_ids(records)
+    by_id = {record.note_id: record.path for record in records}
+    target_ids = item.get("target_notes", [])
+    if not isinstance(target_ids, list) or not target_ids:
+        raise ReviewStateError("merge accept requires at least one target note.")
+
+    changed = 0
+    for target_id_raw in target_ids:
+        target_id = str(target_id_raw)
+        path = by_id.get(target_id)
+        if path is None:
+            raise ReviewStateError(f"Target note {target_id!r} was not found for merge accept.")
+        if _append_merge_body_to_note(path, item_id=str(item["id"]), candidate_body=candidate_body):
+            changed += 1
+        _append_source_to_note(path, source_path=source_path, source_hash=source_hash)
+    return f"Accepted merge into {len(target_ids)} target note(s); body appended on {changed} note(s)."
+
+
+def _accept_dispute_item(data_dir: Path, item: dict[str, Any]) -> str:
+    records = load_note_records(data_dir, validate=True)
+    ensure_unique_note_ids(records)
+    by_id = {record.note_id: record.path for record in records}
+    target_ids = item.get("target_notes", [])
+    if not isinstance(target_ids, list) or not target_ids:
+        raise ReviewStateError("dispute accept requires at least one target note.")
+
+    updated = 0
+    for target_id_raw in target_ids:
+        target_id = str(target_id_raw)
+        path = by_id.get(target_id)
+        if path is None:
+            raise ReviewStateError(f"Target note {target_id!r} was not found for dispute accept.")
+        if _acknowledge_dispute_on_note(path, item_id=str(item["id"])):
+            updated += 1
+    return f"Accepted dispute acknowledgement on {updated} note(s)."
+
+
+def _accept_searchmiss_item(item: dict[str, Any], *, resolution_note: str | None) -> str:
+    text = (resolution_note or "").strip()
+    if not text:
+        raise ReviewStateError("searchmiss accept requires --resolution-note.")
+    payload = item.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+        item["payload"] = payload
+    payload["resolution_note"] = text
+    payload["resolved_at"] = datetime.now().isoformat(timespec="seconds")
+    return "Accepted search-miss item with a resolution note."
+
+
+def _create_note_from_classification(
+    data_dir: Path,
+    *,
+    payload: Mapping[str, Any],
+    topic: str,
+    knowledge_type: str,
+) -> str:
+    records = load_note_records(data_dir, validate=True)
+    ensure_unique_note_ids(records)
+    existing_ids = existing_note_ids(records)
+
+    title = str(payload.get("title") or "Captured note").strip() or "Captured note"
+    summary = str(payload.get("summary") or title).strip() or title
+    today = date.today().isoformat()
+    note_id = generate_note_id(title, today, existing_ids=existing_ids)
+    source_path = str(payload.get("source", "")).strip()
+    source_hash = str(payload.get("source_hash", "")).strip()
+    retrieval_phrases = [title.lower()]
+    frontmatter: dict[str, Any] = {
+        "id": note_id,
+        "title": title,
+        "summary": summary,
+        "topic": topic,
+        "created": today,
+        "updated": today,
+        "knowledge_type": knowledge_type,
+        "status": "active",
+        "confidence": "medium",
+        "basis": ["reviewed classification"],
+        "sources": [],
+        "retrieval_phrases": retrieval_phrases,
+        "agent_use": ["review"],
+        "applies_when": [],
+        "does_not_apply_when": [],
+        "failure_modes": [],
+        "staleness_risk": "medium",
+        "reviewed_by_user": True,
+        "disputes": [],
+        "tags": [topic],
+    }
+    if source_path or source_hash:
+        source: dict[str, Any] = {"type": "ingest"}
+        if source_path:
+            source["ref"] = source_path
+        if source_hash:
+            source["hash"] = source_hash
+        frontmatter["sources"] = [source]
+
+    ensure_topic_layout(data_dir, topic)
+    path = canonical_note_path(data_dir, topic, note_id)
+    note = Note(frontmatter=frontmatter, body=body_template(knowledge_type))
+    note.validate()
+    write_note(path, note)
+    return note_id
+
+
+def _append_source_by_note_id(
+    data_dir: Path,
+    *,
+    note_id: str,
+    source_path: str,
+    source_hash: str,
+) -> bool:
+    records = load_note_records(data_dir, validate=True)
+    ensure_unique_note_ids(records)
+    by_id = {record.note_id: record.path for record in records}
+    target = by_id.get(note_id)
+    if target is None:
+        raise ReviewStateError(f"Note ID {note_id!r} not found for source append.")
+    return _append_source_to_note(target, source_path=source_path, source_hash=source_hash)
+
+
+def _append_source_to_note(path: Path, *, source_path: str, source_hash: str) -> bool:
+    if not source_path and not source_hash:
+        return False
+    note = read_note(path)
+    frontmatter = dict(note.frontmatter)
+    existing = frontmatter.get("sources")
+    if not isinstance(existing, list):
+        existing = []
+    for source in existing:
+        if not isinstance(source, Mapping):
+            continue
+        if source_hash and str(source.get("hash", "")) == source_hash:
+            return False
+        if source_path and str(source.get("ref", "")) == source_path:
+            return False
+
+    entry: dict[str, Any] = {"type": "ingest"}
+    if source_path:
+        entry["ref"] = source_path
+    if source_hash:
+        entry["hash"] = source_hash
+    frontmatter["sources"] = [*existing, entry]
+    frontmatter["updated"] = date.today().isoformat()
+    updated = Note(frontmatter=frontmatter, body=note.body)
+    updated.validate()
+    write_note(path, updated)
+    return True
+
+
+def _append_merge_body_to_note(path: Path, *, item_id: str, candidate_body: str) -> bool:
+    note = read_note(path)
+    marker = f"<!-- review-merge:{item_id} -->"
+    if marker in note.body:
+        return False
+    body = note.body.rstrip("\n")
+    merged = (
+        f"{body}\n\n{marker}\n"
+        f"## Accepted Merge ({item_id})\n\n"
+        f"{candidate_body.rstrip()}\n"
+    )
+    frontmatter = dict(note.frontmatter)
+    frontmatter["updated"] = date.today().isoformat()
+    updated = Note(frontmatter=frontmatter, body=merged)
+    updated.validate()
+    write_note(path, updated)
+    return True
+
+
+def _acknowledge_dispute_on_note(path: Path, *, item_id: str) -> bool:
+    note = read_note(path)
+    frontmatter = dict(note.frontmatter)
+    disputes = frontmatter.get("disputes")
+    if not isinstance(disputes, list):
+        disputes = []
+
+    changed = False
+    for entry in disputes:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("review_item_id") == item_id:
+            if "acknowledged_at" not in entry:
+                entry["acknowledged_at"] = datetime.now().isoformat(timespec="seconds")
+                changed = True
+            if not entry.get("acknowledged"):
+                entry["acknowledged"] = True
+                changed = True
+            break
+    else:
+        disputes.append(
+            {
+                "review_item_id": item_id,
+                "acknowledged": True,
+                "acknowledged_at": datetime.now().isoformat(timespec="seconds"),
+            }
+        )
+        changed = True
+
+    if not frontmatter.get("reviewed_by_user"):
+        frontmatter["reviewed_by_user"] = True
+        changed = True
+    if changed:
+        frontmatter["disputes"] = disputes
+        frontmatter["updated"] = date.today().isoformat()
+        updated = Note(frontmatter=frontmatter, body=note.body)
+        updated.validate()
+        write_note(path, updated)
+    return changed

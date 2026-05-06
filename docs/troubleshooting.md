@@ -43,11 +43,27 @@ Check:
 
 ## Review items are piling up
 
-In the current shipped CLI, `kb review` is summary-only. Use it to see bounded counts and stable item IDs:
+Use `kb review` to see bounded pending counts and stable item IDs:
 
 ```bash
 kb review --data-dir <path>
 ```
+
+Then resolve items directly:
+
+```bash
+kb review explain <item-id> --data-dir <path>
+kb review accept <item-id> ... --data-dir <path>
+kb review reject <item-id> --data-dir <path>
+kb review defer <item-id> --days 30 --data-dir <path>
+```
+
+Useful queue-specific reminders:
+
+- classification accepts need either `--topic` + `--type`, or `--note-id`
+- merge accepts require `--append-body`
+- search-miss accepts require `--resolution-note`
+- duplicate and unsupported-file items should be rejected or deferred
 
 The durable review source of truth is:
 
@@ -60,7 +76,7 @@ You can inspect these generated markdown views directly:
 - `review/disputes.md`
 - `review/search-misses.md`
 
-If `review/review-items.json` is missing in an older KB, `kb review` imports existing Phase 1 queue entries and rerenders the markdown views. Actionable review commands are planned, but not currently shipped.
+If `review/review-items.json` is missing in an older KB, `kb review` imports existing Phase 1 queue entries and rerenders the markdown views.
 
 ## I edited note files manually and results look stale
 

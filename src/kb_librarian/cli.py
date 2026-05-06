@@ -22,7 +22,14 @@ from kb_librarian.indexing import ReindexResult, reindex_data_dir
 from kb_librarian.init import initialize_data_dir
 from kb_librarian.ingest import ingest, render_report
 from kb_librarian.notes import KNOWLEDGE_TYPES, Note, body_template, generate_note_id, parse_note_text, write_note
-from kb_librarian.review import collect_review_summary, render_review_summary
+from kb_librarian.review import (
+    accept_review_item,
+    collect_review_summary,
+    defer_review_item,
+    explain_review_item,
+    reject_review_item,
+    render_review_summary,
+)
 from kb_librarian.search_index import query_candidates, score_document, tokenize_query
 from kb_librarian.storage import (
     canonical_note_path,
@@ -177,9 +184,20 @@ def _add_review_parser(subcommands: argparse._SubParsersAction[argparse.Argument
     parser.add_argument(
         "action",
         nargs="?",
-        choices=("list",),
-        help="Optional alias. `list` is equivalent to `kb review`.",
+        choices=("list", "explain", "accept", "reject", "defer"),
+        help="Optional action. `list` is equivalent to `kb review`.",
     )
+    parser.add_argument("item_id", nargs="?", help="Review item ID used by explain/accept/reject/defer.")
+    parser.add_argument("--days", type=int, help="Days to defer an item; required for `kb review defer`.")
+    parser.add_argument("--topic", help="Topic for classification acceptance when creating a note.")
+    parser.add_argument("--type", dest="knowledge_type", help="Knowledge type for classification acceptance.")
+    parser.add_argument("--note-id", help="Existing note ID for source-append acceptance.")
+    parser.add_argument(
+        "--append-body",
+        action="store_true",
+        help="Required for merge acceptance; explicitly approves candidate body append.",
+    )
+    parser.add_argument("--resolution-note", help="Resolution text for search-miss acceptance.")
     parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
     parser.set_defaults(handler=_handle_review)
 
@@ -217,10 +235,48 @@ def _handle_review(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
     config = load_config(data_dir)
-    max_items = int(config.get("review", {}).get("max_review_items_per_run", 10))
-    counts, items = collect_review_summary(data_dir, max_items=max_items)
-    print(render_review_summary(counts, items, max_items=max_items), end="")
-    return 0
+    action = str(args.action or "list")
+
+    if action in {"list"}:
+        max_items = int(config.get("review", {}).get("max_review_items_per_run", 10))
+        counts, items = collect_review_summary(data_dir, max_items=max_items)
+        print(render_review_summary(counts, items, max_items=max_items), end="")
+        return 0
+
+    item_id = str(args.item_id or "").strip()
+    if not item_id:
+        raise KBLibrarianError(f"`kb review {action}` requires <item-id>.")
+
+    if action == "explain":
+        print(explain_review_item(data_dir, item_id), end="")
+        return 0
+
+    if action == "accept":
+        result = accept_review_item(
+            data_dir,
+            item_id,
+            topic=args.topic,
+            knowledge_type=args.knowledge_type,
+            note_id=args.note_id,
+            append_body=bool(args.append_body),
+            resolution_note=args.resolution_note,
+        )
+        print(result.message)
+        return 0
+
+    if action == "reject":
+        result = reject_review_item(data_dir, item_id)
+        print(result.message)
+        return 0
+
+    if action == "defer":
+        if args.days is None:
+            raise KBLibrarianError("`kb review defer <item-id>` requires --days <n>.")
+        result = defer_review_item(data_dir, item_id, days=int(args.days))
+        print(result.message)
+        return 0
+
+    raise KBLibrarianError(f"Unsupported review action: {action!r}")
 
 
 def _handle_context(args: argparse.Namespace) -> int:

@@ -17,6 +17,12 @@ When implementing a milestone, assign the whole runnable increment to a coding-f
 
 Keep implementation scoped to the active milestone. Preserve earlier milestone interfaces and data layouts unless the canonical spec requires a change. Run the relevant automated tests before handing off, and note any tests that could not be run.
 
+## Documentation and Commit Cadence
+
+When milestone work changes user-visible behavior (CLI commands, flags, outputs, setup flow, or review workflow), update user-facing documentation in the same milestone rather than deferring documentation to later.
+
+Commit implementation work in regular, meaningful increments during the milestone (not only one large end-state commit), and make a final milestone commit after verification and plan-status updates are complete.
+
 ## Milestone Status Maintenance
 
 When a milestone is completed (for example `01a`), keep its plan file as the historical completion record and update status in place.

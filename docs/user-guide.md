@@ -173,9 +173,46 @@ Review items are stored in `review/review-items.json` with stable IDs, status, p
 - `review/disputes.md`
 - `review/search-misses.md`
 
-`kb review` and `kb review list` read from `review/review-items.json`, hide resolved items from default output, and bound the number of listed items using `review.max_review_items_per_run`. If a Phase 1 KB only has markdown queues, the first review run imports those entries into durable state and rerenders the queue files.
+`kb review` and `kb review list` read from `review/review-items.json`, hide resolved items from default output, hide deferred items until due, and bound the number of listed items using `review.max_review_items_per_run`. If a Phase 1 KB only has markdown queues, the first review run imports those entries into durable state and rerenders the queue files.
 
-Current shipped review behavior is still read-only summary output. Actionable review commands are planned but not part of the current CLI.
+Explain one review item:
+
+```bash
+kb review explain <item-id> --data-dir /path/to/kb
+```
+
+Resolve a classification item by creating a note:
+
+```bash
+kb review accept <item-id> --topic agent-systems --type technique --data-dir /path/to/kb
+```
+
+Resolve a classification item by appending the source to an existing note:
+
+```bash
+kb review accept <item-id> --note-id 2026-05-04-existing-note --data-dir /path/to/kb
+```
+
+Resolve a merge item with explicit body-append approval:
+
+```bash
+kb review accept <item-id> --append-body --data-dir /path/to/kb
+```
+
+Reject or defer an item:
+
+```bash
+kb review reject <item-id> --data-dir /path/to/kb
+kb review defer <item-id> --days 30 --data-dir /path/to/kb
+```
+
+For `searchmiss` items, provide a resolution note:
+
+```bash
+kb review accept <item-id> --resolution-note "Added retrieval phrase and topic seed note." --data-dir /path/to/kb
+```
+
+In the current shipped CLI, accept actions are supported for classification, merge, dispute, and search-miss items. Duplicate and unsupported-file items should be handled with `reject` or `defer`.
 
 ## Recommended Early Workflow
 

@@ -269,6 +269,102 @@ def test_kb_review_lists_bounded_items(tmp_path):
     assert list_result.stdout == result.stdout
 
 
+def test_kb_review_actionable_workflow_smoke(tmp_path):
+    init_result = run_cli("init", "--data-dir", str(tmp_path))
+    assert init_result.returncode == 0
+
+    (tmp_path / "review" / "review-items.json").write_text(
+        "{\n"
+        "  \"version\": 1,\n"
+        "  \"items\": [\n"
+        "    {\n"
+        "      \"id\": \"classification-2026-05-04-001\",\n"
+        "      \"queue\": \"classification\",\n"
+        "      \"status\": \"pending\",\n"
+        "      \"priority\": \"medium\",\n"
+        "      \"title\": \"Candidate A\",\n"
+        "      \"created\": \"2026-05-04\",\n"
+        "      \"updated\": \"2026-05-04\",\n"
+        "      \"target_notes\": [],\n"
+        "      \"proposed_action\": \"review classification manually\",\n"
+        "      \"payload\": {\n"
+        "        \"title\": \"Candidate A\",\n"
+        "        \"summary\": \"Candidate A summary.\",\n"
+        "        \"source\": \"raw/a.md\",\n"
+        "        \"source_hash\": \"abc\",\n"
+        "        \"fingerprint\": \"fp-a\"\n"
+        "      },\n"
+        "      \"history\": []\n"
+        "    },\n"
+        "    {\n"
+        "      \"id\": \"merge-2026-05-04-001\",\n"
+        "      \"queue\": \"merge\",\n"
+        "      \"status\": \"pending\",\n"
+        "      \"priority\": \"medium\",\n"
+        "      \"title\": \"Merge Candidate\",\n"
+        "      \"created\": \"2026-05-04\",\n"
+        "      \"updated\": \"2026-05-04\",\n"
+        "      \"target_notes\": [],\n"
+        "      \"proposed_action\": \"review and merge manually\",\n"
+        "      \"payload\": {\n"
+        "        \"candidate_title\": \"Merge Candidate\",\n"
+        "        \"candidate_body\": \"body\",\n"
+        "        \"fingerprint\": \"fp-b\"\n"
+        "      },\n"
+        "      \"history\": []\n"
+        "    }\n"
+        "  ]\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    explain_result = run_cli("review", "explain", "classification-2026-05-04-001", "--data-dir", str(tmp_path))
+    assert explain_result.returncode == 0
+    assert "Review item: classification-2026-05-04-001" in explain_result.stdout
+
+    defer_result = run_cli(
+        "review",
+        "defer",
+        "classification-2026-05-04-001",
+        "--days",
+        "30",
+        "--data-dir",
+        str(tmp_path),
+    )
+    assert defer_result.returncode == 0
+    assert "Deferred until" in defer_result.stdout
+
+    list_after_defer = run_cli("review", "list", "--data-dir", str(tmp_path))
+    assert list_after_defer.returncode == 0
+    assert "Review items: 1" in list_after_defer.stdout
+    assert "merge-2026-05-04-001" in list_after_defer.stdout
+    assert "classification-2026-05-04-001" not in list_after_defer.stdout
+
+    accept_result = run_cli(
+        "review",
+        "accept",
+        "classification-2026-05-04-001",
+        "--topic",
+        "agent-systems",
+        "--type",
+        "technique",
+        "--data-dir",
+        str(tmp_path),
+    )
+    assert accept_result.returncode == 0
+    assert "creating note" in accept_result.stdout
+    assert list((tmp_path / "topics" / "agent-systems").glob("*.md"))
+
+    reject_result = run_cli("review", "reject", "merge-2026-05-04-001", "--data-dir", str(tmp_path))
+    assert reject_result.returncode == 0
+    assert "rejected" in reject_result.stdout.lower()
+
+    final_list = run_cli("review", "--data-dir", str(tmp_path))
+    assert final_list.returncode == 0
+    assert "Review items: 0" in final_list.stdout
+    assert (tmp_path / "review" / "rejected" / "merge-2026-05-04-001.md").is_file()
+
+
 def test_kb_context_requires_positive_budget(tmp_path):
     run_cli("init", "--data-dir", str(tmp_path))
     result = run_cli("context", "agent context task", "--budget", "0", "--data-dir", str(tmp_path))

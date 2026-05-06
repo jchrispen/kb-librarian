@@ -17,7 +17,7 @@ This repository currently ships the Phase 1 core workflow plus the Phase 2 durab
 - `kb review`
 - `kb context`
 
-Planned later-phase features such as `kb explore`, actionable review commands, usage logging, compaction, and automation templates are documented in the design and implementation plans, but they are not part of the shipped CLI yet.
+Planned later-phase features such as `kb explore`, usage logging, compaction, and automation templates are documented in the design and implementation plans, but they are not part of the shipped CLI yet.
 
 ## What It Does
 
@@ -110,7 +110,7 @@ Important review files:
 - `kb reindex`: rebuild markdown indexes, backlinks, manifest, stats, and lexical index
 - `kb search`: search notes by title, summary, tags, retrieval phrases, and body text
 - `kb get`: inspect one note by ID
-- `kb review`: inspect bounded review queues backed by `review/review-items.json`
+- `kb review`: inspect and resolve bounded review queues backed by `review/review-items.json`
 - `kb context`: retrieve compact cited context for a task
 
 ## Provider Notes

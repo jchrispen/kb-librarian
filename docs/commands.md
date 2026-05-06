@@ -60,13 +60,27 @@ Current shipped supported input formats:
 
 ## `kb review`
 
-Show bounded review counts and queue excerpts backed by durable review state.
+Inspect and resolve review items backed by durable review state.
 
 ```bash
 kb review [list] [--data-dir <path>]
+kb review explain <item-id> [--data-dir <path>]
+kb review accept <item-id> [--topic <topic> --type <knowledge-type> | --note-id <id>] [--append-body] [--resolution-note <text>] [--data-dir <path>]
+kb review reject <item-id> [--data-dir <path>]
+kb review defer <item-id> --days <n> [--data-dir <path>]
 ```
 
-`kb review` and `kb review list` are equivalent. They read pending items from `review/review-items.json`, create that file by importing Phase 1 markdown queues when needed, and rerender markdown views under `review/`.
+Notes:
+
+- `kb review` and `kb review list` are equivalent. They read pending items from `review/review-items.json`, create that file by importing Phase 1 markdown queues when needed, and rerender markdown views under `review/`.
+- Deferred items are hidden from default `review/list` output until due.
+- `kb review explain` prints queue, status, priority, payload, target-note paths, and history for one item.
+- `kb review accept` supports:
+  - classification: create a note (`--topic` + `--type`) or append source to an existing note (`--note-id`)
+  - merge: append candidate body to target note(s) only with explicit `--append-body`
+  - dispute: acknowledge dispute on target note(s)
+  - searchmiss: record a resolution note (`--resolution-note`)
+- Duplicate and unsupported-file queue items should be handled with `reject` or `defer`.
 
 Rendered review views include:
 
@@ -74,8 +88,6 @@ Rendered review views include:
 - `review/pending-merge.md`
 - `review/disputes.md`
 - `review/search-misses.md`
-
-Current shipped behavior is summary output only; accepting, rejecting, deferring, and explaining review items are still planned commands.
 
 ## `kb context`
 
@@ -102,5 +114,4 @@ The current shipped CLI does not yet include these planned commands:
 - `kb usage`
 - `kb log-use`
 - `kb doctor`
-- actionable `kb review accept|reject|defer|explain`
 - topic reorganization commands

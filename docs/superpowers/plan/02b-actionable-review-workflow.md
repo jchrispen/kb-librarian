@@ -2,6 +2,9 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
+Status: Complete
+Completed: 2026-05-06
+
 ## Goal
 
 Make review actionable instead of read-only. At the end of this milestone, a human can inspect one review item, accept supported actions, reject invalid work, or defer items for later without editing markdown files by hand.
@@ -82,6 +85,20 @@ Make review actionable instead of read-only. At the end of this milestone, a hum
 - Supported accept actions update notes or review state safely and idempotently.
 - Rejected and deferred items are tracked durably and no longer clutter default pending output.
 - Review ordering and output keep a normal session under roughly 5 minutes.
+
+## Completion Record
+
+Implemented files:
+
+- `src/kb_librarian/review.py`
+- `src/kb_librarian/cli.py`
+- `tests/test_review.py`
+- `tests/test_cli.py`
+
+Verification:
+
+- `python3 -m pytest tests/test_review.py tests/test_cli.py::test_kb_review_lists_bounded_items tests/test_cli.py::test_kb_review_actionable_workflow_smoke` - passed, 12 tests.
+- `python3 -m pytest` - passed, 60 tests.
 
 ## Out of Scope
 
