@@ -1,0 +1,141 @@
+# Configuration Reference
+
+## Config File Location
+
+KB Librarian stores its config at:
+
+```text
+<data-dir>/.kb/config.yaml
+```
+
+The file is created by `kb init`.
+
+## Data Directory Resolution
+
+The CLI resolves the KB data directory in this order:
+
+1. `--data-dir`
+2. `KB_DATA_DIR`
+3. configured `data_dir` from `<default-data-dir>/.kb/config.yaml`
+4. `/mnt/c/workspace/source/internal/kb`
+
+## Default Config Shape
+
+The generated config includes these sections:
+
+- `data_dir`
+- `providers`
+- `operations`
+- `retrieval`
+- `ingest`
+- `indexes`
+- `review`
+- `git`
+- `privacy`
+- `hooks`
+
+## Example
+
+```yaml
+data_dir: /mnt/c/workspace/source/internal/kb
+
+providers:
+  anthropic:
+    api_key_env: ANTHROPIC_API_KEY
+
+operations:
+  extract:    { provider: anthropic, model: claude-sonnet-4-6 }
+  compact:    { provider: anthropic, model: claude-sonnet-4-6 }
+  classify:   { provider: anthropic, model: claude-haiku-4-5 }
+  integrate:  { provider: anthropic, model: claude-haiku-4-5 }
+  synthesize: { provider: anthropic, model: claude-haiku-4-5 }
+
+retrieval:
+  default_budget_tokens: 1500
+  context_budget_tokens: 1800
+  explore_budget_tokens: 3000
+  index_token_cap: 5000
+  lexical_index: true
+  embeddings: false
+  title_weight: 5
+  summary_weight: 4
+  retrieval_phrase_weight: 4
+  tag_weight: 3
+  body_weight: 1
+
+ingest:
+  max_notes_per_doc: 7
+  prefer_skip_over_low_value_note: true
+  low_confidence_goes_to_review: true
+
+indexes:
+  topic_sort: alphabetical
+  top_level_min_notes: 1
+
+review:
+  stale_after_days: 180
+  orphan_after_days: 30
+  duplicate_cluster_threshold: 4
+  compaction_cooldown_days: 30
+  max_review_items_per_run: 10
+
+git:
+  auto_commit: false
+  require_clean_worktree_for_rewrites: true
+
+privacy:
+  cloud_llm_allowed: true
+  blocked_topics: []
+  redact_patterns: []
+
+hooks:
+  session_start_ingest: false
+```
+
+## Provider Configuration
+
+The generated config routes operations through Anthropic by default. The environment variable named by `providers.anthropic.api_key_env` must be set for those operations to work.
+
+Example:
+
+```bash
+export ANTHROPIC_API_KEY=your_key_here
+```
+
+If the key is missing, provider-backed commands fail with an explicit error.
+
+## Offline Mock Provider
+
+The codebase supports a deterministic `mock` provider for tests and offline smoke checks, but `kb init` does not configure it by default.
+
+That means changing to the mock provider is a manual config edit for developers, not normal end-user setup.
+
+## Retrieval Settings
+
+Useful retrieval settings:
+
+- `context_budget_tokens`: default token budget for `kb context`
+- `title_weight`: title match weight in lexical ranking
+- `summary_weight`: summary match weight
+- `retrieval_phrase_weight`: retrieval phrase match weight
+- `tag_weight`: tag match weight
+- `body_weight`: body text match weight
+
+## Ingest Settings
+
+Useful ingest settings:
+
+- `max_notes_per_doc`: maximum candidate notes extracted from one document
+- `prefer_skip_over_low_value_note`: prefer no note over weak notes
+- `low_confidence_goes_to_review`: route ambiguous classification to review
+
+## Hooks Flag
+
+`kb init --hooks` only affects newly created config by setting:
+
+```yaml
+hooks:
+  session_start_ingest: true
+```
+
+In the current shipped CLI, this records intent in config. It does not install external hooks or automation.
