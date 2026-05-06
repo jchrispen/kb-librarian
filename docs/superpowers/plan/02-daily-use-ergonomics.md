@@ -14,8 +14,8 @@ Phase 2 assumes Phase 1 is complete and should preserve all existing note files,
 |---|---|---|
 | [02a - Durable Review State and Queue Rendering](02a-durable-review-state-and-queue-rendering.md) | Complete | Introduced `review/review-items.json`, stable IDs, idempotent Phase 1 review import, and rendered markdown queues backed by durable state. |
 | [02b - Actionable Review Workflow](02b-actionable-review-workflow.md) | Complete | Added explain/accept/reject/defer commands, state transitions with defer-until visibility, and actionable review mutation flows with tests. |
-| [02c - Explore and Citation Surfaces](02c-explore-and-citation-surfaces.md) | Next | Adds `kb explore` and phase-2 citation blocks for retrieval commands. |
-| [02d - Usage and Search-Miss Feedback](02d-usage-and-search-miss-feedback.md) | Pending | Adds usage logging, `kb log-use`, `kb usage`, search-miss logging, and miss promotion into review. |
+| [02c - Explore and Citation Surfaces](02c-explore-and-citation-surfaces.md) | Complete | Added `kb explore`, broad-recall exploration synthesis, default context/explore citation blocks, optional search citation blocks, and structured citation JSON fields. |
+| [02d - Usage and Search-Miss Feedback](02d-usage-and-search-miss-feedback.md) | Next | Adds usage logging, `kb log-use`, `kb usage`, search-miss logging, and miss promotion into review. |
 | [02e - Preamble Install, Ingest Reports, and Session Proof](02e-preamble-ingest-reports-and-session-proof.md) | Pending | Adds `kb init --hooks`, revised `PREAMBLE.md`, ingest report polish, and end-to-end normal-session verification. |
 
 ## Milestone Order
@@ -24,9 +24,9 @@ Phase 2 assumes Phase 1 is complete and should preserve all existing note files,
    - Creates the machine-readable review state model with stable IDs and keeps markdown review files as rendered inspection surfaces.
 2. [02b - Actionable Review Workflow](02b-actionable-review-workflow.md) - complete
    - Makes review items explainable and resolvable without manual file edits while keeping the workflow bounded.
-3. [02c - Explore and Citation Surfaces](02c-explore-and-citation-surfaces.md) - next
+3. [02c - Explore and Citation Surfaces](02c-explore-and-citation-surfaces.md) - complete
    - Adds broad-recall ideation retrieval and citation-ready output for agent-facing commands.
-4. [02d - Usage and Search-Miss Feedback](02d-usage-and-search-miss-feedback.md) - pending
+4. [02d - Usage and Search-Miss Feedback](02d-usage-and-search-miss-feedback.md) - next
    - Records retrieval/use signals and turns repeated misses into reviewable improvement work.
 5. [02e - Preamble Install, Ingest Reports, and Session Proof](02e-preamble-ingest-reports-and-session-proof.md) - pending
    - Finishes normal-session ergonomics with installable agent guidance, better ingest summaries, and a phase-level proof run.

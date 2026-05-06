@@ -2,6 +2,9 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
+Status: Complete
+Completed: 2026-05-06
+
 ## Goal
 
 Add a distinct ideation retrieval path and make retrieval output easier for agents to cite directly. At the end of this milestone, agents can call `kb explore` for broader associations and can request or receive structured citation blocks from retrieval commands.
@@ -79,6 +82,25 @@ Add a distinct ideation retrieval path and make retrieval output easier for agen
 - Retrieval commands can emit citation-ready source blocks with required metadata.
 - JSON outputs include the same citation information as structured fields.
 - Empty-result behavior remains clear and non-destructive.
+
+## Completion Record
+
+Implemented files:
+
+- `src/kb_librarian/context.py`
+- `src/kb_librarian/providers.py`
+- `src/kb_librarian/cli.py`
+- `tests/test_context.py`
+- `tests/test_providers.py`
+- `tests/test_cli.py`
+- `docs/commands.md`
+- `docs/user-guide.md`
+- `docs/configuration.md`
+
+Verification:
+
+- `pytest tests/test_context.py tests/test_providers.py tests/test_cli.py -q` - passed, 26 tests.
+- `pytest -q` - passed, 65 tests.
 
 ## Out of Scope
 
