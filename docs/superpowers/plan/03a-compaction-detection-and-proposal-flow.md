@@ -1,5 +1,8 @@
 # Phase 03a - Compaction Detection and Proposal Flow
 
+Status: Complete
+Completed: 2026-05-06
+
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
 ## Goal
@@ -77,6 +80,38 @@ Existing Phase 2 review commands should surface compaction items once they exist
 - Compaction review items are durable, stable, and rendered for human inspection.
 - `kb compact` can draft a canonical proposal without mutating notes.
 - Compaction proposals preserve enough provenance and evidence for later acceptance.
+
+## Completion Record
+
+Completed on 2026-05-06.
+
+Implemented files:
+
+- `src/kb_librarian/compaction.py`
+- `src/kb_librarian/cli.py`
+- `src/kb_librarian/indexing.py`
+- `src/kb_librarian/review.py`
+- `src/kb_librarian/providers.py`
+- `src/kb_librarian/init.py`
+- `src/kb_librarian/paths.py`
+- `tests/test_compaction.py`
+- `tests/test_cli.py`
+- `README.md`
+- `docs/commands.md`
+- `docs/configuration.md`
+- `docs/user-guide.md`
+
+Verification:
+
+- `pytest -q tests/test_compaction.py tests/test_cli.py::test_kb_reindex_scan_clusters_and_compact_smoke` - passed, 7 tests.
+- `pytest -q` - passed, 83 tests.
+
+Behavior delivered:
+
+- `kb reindex --scan-clusters` queues deterministic `compaction` review items rendered in `review/pending-compaction.md`.
+- Cluster scanning respects `review.duplicate_cluster_threshold` and `review.compaction_cooldown_days`.
+- `kb compact <topic-or-cluster>` resolves topics, compaction review item IDs, and `cluster-...` IDs, then stores provider-drafted canonical note proposals as review items without mutating source notes.
+- Compaction drafts include proposed frontmatter, body markdown, source note IDs, disposition plans, evidence, and diff summaries.
 
 ## Out of Scope
 
