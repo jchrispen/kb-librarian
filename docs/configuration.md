@@ -122,6 +122,8 @@ Useful retrieval settings:
 - `tag_weight`: tag match weight
 - `body_weight`: body text match weight
 
+Retrieval commands also write append-only usage signals to `.kb/usage.log`. Empty, weak, or explicitly reported poor searches write `.kb/search-misses.log`; the aggregate counters in `.kb/stats.json` are rebuildable from those logs.
+
 ## Ingest Settings
 
 Useful ingest settings:

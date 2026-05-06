@@ -34,7 +34,7 @@ This creates:
 - `topics/` for canonical notes
 - `raw/` for ingest input
 - `review/` for human review queues
-- `.kb/` for config and generated state
+- `.kb/` for config, generated state, and append-only logs
 
 If you omit `--data-dir`, KB Librarian resolves the data directory in this order:
 
@@ -107,6 +107,7 @@ This rebuilds generated artifacts such as:
 - top-level and topic `INDEX.md` files
 - `.kb/backlinks.json`
 - `.kb/index-manifest.json`
+- `.kb/stats.json`
 - `.kb/fts.sqlite`
 
 ## Search and Inspect Notes
@@ -127,6 +128,12 @@ Include a citation block when you plan to cite search results:
 
 ```bash
 kb search "retrieval" --with-citations --data-dir /path/to/kb
+```
+
+Searches are logged to `.kb/usage.log` without note bodies. Empty or weak searches are logged to `.kb/search-misses.log`; repeated misses become review items under `review/search-misses.md`. If results appear but are not useful, record that signal explicitly:
+
+```bash
+kb search "retrieval" --report-miss --data-dir /path/to/kb
 ```
 
 Inspect one note:
@@ -166,6 +173,8 @@ kb context "review this architecture" --mode architecture --json --data-dir /pat
 
 Context output includes source notes and a `KB sources` citation block by default. JSON output includes structured `citations`.
 
+Context retrievals are logged automatically. Use `--report-miss` when the returned context is not useful enough and should become KB improvement feedback.
+
 ## Explore Ideas
 
 Use `kb explore` for ideation, alternatives, architecture options, tradeoffs, and adjacent concepts.
@@ -179,6 +188,30 @@ kb explore "ways to reduce token burn while preserving agent access" --data-dir 
 ```bash
 kb explore "agent context alternatives" --json --data-dir /path/to/kb
 ```
+
+Exploration retrievals are logged automatically. Use `--report-miss` when exploration misses the useful adjacent concepts you expected.
+
+## Track Usage and Misses
+
+Record that an agent actually used or cited a note:
+
+```bash
+kb log-use 2026-05-04-agent-context-cli-contract --task "cited during architecture review" --data-dir /path/to/kb
+```
+
+Inspect lightweight usage summaries:
+
+```bash
+kb usage --data-dir /path/to/kb
+kb usage --since 7d --data-dir /path/to/kb
+kb usage --note 2026-05-04-agent-context-cli-contract --data-dir /path/to/kb
+```
+
+Usage summaries include retrieval counts, explicit note-use counts, top retrieved notes, logged note uses, and search-miss counts. The logs are append-only JSONL files and do not store note bodies:
+
+- `.kb/usage.log`
+- `.kb/search-misses.log`
+- `.kb/stats.json`
 
 ## Review Pending Work
 
@@ -196,6 +229,8 @@ Review items are stored in `review/review-items.json` with stable IDs, status, p
 - `review/search-misses.md`
 
 `kb review` and `kb review list` read from `review/review-items.json`, hide resolved items from default output, hide deferred items until due, and bound the number of listed items using `review.max_review_items_per_run`. If a Phase 1 KB only has markdown queues, the first review run imports those entries into durable state and rerenders the queue files.
+
+Repeated or explicitly reported search misses become `searchmiss` review items. Accepting a search-miss item records a resolution note; it does not create or rewrite canonical notes automatically.
 
 Explain one review item:
 
@@ -245,4 +280,6 @@ In the current shipped CLI, accept actions are supported for classification, mer
 5. Use `kb search` for exact concepts.
 6. Use `kb context` before architecture or coding work.
 7. Use `kb explore` when you need alternatives or adjacent ideas.
-8. Check `kb review` periodically for classification, merge, dispute, duplicate, and unsupported-file items.
+8. Run `kb log-use` after citing a note in agent work.
+9. Run `kb usage` periodically to inspect retrieval and note-use signals.
+10. Check `kb review` periodically for classification, merge, dispute, search-miss, duplicate, and unsupported-file items.

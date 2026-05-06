@@ -2,6 +2,9 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
+Status: Complete
+Completed: 2026-05-06
+
 ## Goal
 
 Let the KB learn from use without rewriting content automatically. At the end of this milestone, retrieval and explicit note usage are logged, repeated failed lookups become reviewable search-miss items, and a human can inspect lightweight usage summaries.
@@ -82,6 +85,29 @@ Retrieval commands should also gain logging side effects during normal operation
 - `kb usage` gives useful lightweight summaries.
 - Repeated or important misses become reviewable items.
 - Search-miss promotion does not create notes automatically.
+
+## Completion Record
+
+Implemented files:
+
+- `src/kb_librarian/usage.py`
+- `src/kb_librarian/cli.py`
+- `src/kb_librarian/context.py`
+- `src/kb_librarian/indexing.py`
+- `src/kb_librarian/paths.py`
+- `src/kb_librarian/review.py`
+- `tests/test_usage.py`
+- `tests/test_cli.py`
+- `docs/commands.md`
+- `docs/user-guide.md`
+- `docs/configuration.md`
+
+Verification:
+
+- `pytest tests/test_usage.py -q` - passed, 4 tests.
+- `pytest tests/test_cli.py -q` - passed, 13 tests.
+- `pytest tests/test_usage.py tests/test_cli.py tests/test_context.py tests/test_review.py -q` - passed, 33 tests.
+- `pytest -q` - passed, 71 tests.
 
 ## Out of Scope
 

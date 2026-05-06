@@ -34,17 +34,19 @@ kb reindex [--data-dir <path>]
 Search note titles, summaries, tags, retrieval phrases, and bodies.
 
 ```bash
-kb search <query> [--data-dir <path>] [--topic <topic>] [--type <knowledge-type>] [--budget <tokens>] [--json] [--with-citations]
+kb search <query> [--data-dir <path>] [--topic <topic>] [--type <knowledge-type>] [--budget <tokens>] [--json] [--with-citations] [--report-miss]
 ```
 
 Use `--with-citations` to include a citation block in human-readable output. JSON output includes a `citation` object on each result.
+
+Searches are logged to `.kb/usage.log` without note bodies. Empty or weak searches are logged to `.kb/search-misses.log`; repeated misses become `searchmiss` review items. Use `--report-miss` when results were present but not useful.
 
 ## `kb explore`
 
 Retrieve broader associations, adjacent patterns, tradeoffs, analogies, anti-patterns, and open questions for ideation.
 
 ```bash
-kb explore <problem> [--budget <tokens>] [--json] [--with-citations] [--data-dir <path>]
+kb explore <problem> [--budget <tokens>] [--json] [--with-citations] [--report-miss] [--data-dir <path>]
 ```
 
 `kb explore` uses `retrieval.explore_budget_tokens` when `--budget` is omitted. Human-readable and JSON output include citation metadata by default.
@@ -106,7 +108,7 @@ Rendered review views include:
 Retrieve high-precision context for a task and return a compact cited response.
 
 ```bash
-kb context <task> [--mode <mode>] [--budget <tokens>] [--json] [--with-citations] [--data-dir <path>]
+kb context <task> [--mode <mode>] [--budget <tokens>] [--json] [--with-citations] [--report-miss] [--data-dir <path>]
 ```
 
 Supported modes:
@@ -120,11 +122,31 @@ Supported modes:
 
 Human-readable and JSON output include citation metadata by default.
 
+Context and exploration retrievals are logged to `.kb/usage.log` without note bodies. Empty retrievals are logged as search misses, and `--report-miss` records an explicit poor-result signal.
+
+## `kb log-use`
+
+Record that an agent actually used or cited a note.
+
+```bash
+kb log-use <id> [--task <task>] [--data-dir <path>]
+```
+
+The note ID is validated before the append-only event is written to `.kb/usage.log`.
+
+## `kb usage`
+
+Summarize retrieval and explicit note-use signals.
+
+```bash
+kb usage [--since <duration>] [--note <id>] [--data-dir <path>]
+```
+
+`--since` accepts durations such as `30m`, `24h`, `7d`, `2w`, or an ISO date. `--note` filters the summary to one validated note ID.
+
 ## Current Command Surface
 
 The current shipped CLI does not yet include these planned commands:
 
-- `kb usage`
-- `kb log-use`
 - `kb doctor`
 - topic reorganization commands
