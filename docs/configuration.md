@@ -115,6 +115,7 @@ That means changing to the mock provider is a manual config edit for developers,
 Useful retrieval settings:
 
 - `context_budget_tokens`: default token budget for `kb context`
+- `explore_budget_tokens`: default token budget for `kb explore`
 - `title_weight`: title match weight in lexical ranking
 - `summary_weight`: summary match weight
 - `retrieval_phrase_weight`: retrieval phrase match weight

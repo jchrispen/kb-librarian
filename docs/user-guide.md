@@ -123,6 +123,12 @@ Filter by topic or knowledge type:
 kb search "retrieval" --topic agent-systems --type technique --data-dir /path/to/kb
 ```
 
+Include a citation block when you plan to cite search results:
+
+```bash
+kb search "retrieval" --with-citations --data-dir /path/to/kb
+```
+
 Inspect one note:
 
 ```bash
@@ -156,6 +162,22 @@ JSON output is available:
 
 ```bash
 kb context "review this architecture" --mode architecture --json --data-dir /path/to/kb
+```
+
+Context output includes source notes and a `KB sources` citation block by default. JSON output includes structured `citations`.
+
+## Explore Ideas
+
+Use `kb explore` for ideation, alternatives, architecture options, tradeoffs, and adjacent concepts.
+
+```bash
+kb explore "ways to reduce token burn while preserving agent access" --data-dir /path/to/kb
+```
+
+`kb explore` uses broader recall than `kb context` and includes source notes plus a `KB sources` citation block by default. JSON output includes structured `citations`:
+
+```bash
+kb explore "agent context alternatives" --json --data-dir /path/to/kb
 ```
 
 ## Review Pending Work
@@ -222,4 +244,5 @@ In the current shipped CLI, accept actions are supported for classification, mer
 4. Run `kb reindex` when you make manual changes.
 5. Use `kb search` for exact concepts.
 6. Use `kb context` before architecture or coding work.
-7. Check `kb review` periodically for classification, merge, dispute, duplicate, and unsupported-file items.
+7. Use `kb explore` when you need alternatives or adjacent ideas.
+8. Check `kb review` periodically for classification, merge, dispute, duplicate, and unsupported-file items.

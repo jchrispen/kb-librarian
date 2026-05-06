@@ -102,6 +102,9 @@ class LLMProvider(Protocol):
     def synthesize_context(self, **kwargs: object) -> str:
         """Return future task-shaped context."""
 
+    def synthesize_exploration(self, **kwargs: object) -> str:
+        """Return broad ideation context."""
+
 
 def operation_route(config: Mapping[str, Any], operation: str) -> OperationRoute:
     operations = config.get("operations")
@@ -323,6 +326,64 @@ class MockProvider:
         )
         return "\n".join(lines).strip()
 
+    def synthesize_exploration(self, **kwargs: object) -> str:
+        problem = str(kwargs.get("problem", "")).strip()
+        selected_notes = kwargs.get("selected_notes")
+        if not isinstance(selected_notes, list):
+            selected_notes = []
+
+        direct_notes = [note for note in selected_notes if isinstance(note, Mapping)]
+        lines = ["## Directly relevant concepts"]
+        if direct_notes:
+            for note in direct_notes[:3]:
+                note_id = str(note.get("note_id", "")).strip()
+                summary = str(note.get("summary", "")).strip()
+                if note_id and summary:
+                    lines.append(f"- [{note_id}] {summary}")
+        else:
+            lines.append("- No directly relevant concepts found.")
+
+        lines.extend(["", "## Adjacent patterns"])
+        for note in direct_notes[:4]:
+            note_id = str(note.get("note_id", "")).strip()
+            title = str(note.get("title", "")).strip()
+            if note_id and title:
+                lines.append(f"- [{note_id}] Consider adjacent use of {title.lower()}.")
+        if len(lines) >= 2 and lines[-1] == "## Adjacent patterns":
+            lines.append("- No adjacent patterns found.")
+
+        lines.extend(["", "## Tensions / tradeoffs"])
+        if direct_notes:
+            lines.append("- Balance broad recall against grounding; keep claims tied to cited notes.")
+        else:
+            lines.append("- No tradeoffs identified from selected notes.")
+
+        lines.extend(["", "## Possible analogies"])
+        if direct_notes:
+            lines.append("- Treat retrieved notes as reusable concept modules for the current problem.")
+        else:
+            lines.append("- No analogies identified from selected notes.")
+
+        lines.extend(["", "## Anti-patterns to avoid"])
+        warned = False
+        for note in direct_notes:
+            note_id = str(note.get("note_id", "")).strip()
+            trust_flags = note.get("trust_flags", [])
+            if isinstance(trust_flags, list) and trust_flags:
+                lines.append(f"- [{note_id}] Avoid treating this as settled: {', '.join(str(item) for item in trust_flags)}.")
+                warned = True
+        if not warned:
+            lines.append("- Avoid inventing connections not supported by source notes.")
+
+        lines.extend(
+            [
+                "",
+                "## Open questions",
+                f"- What constraint matters most for: {problem or 'this exploration'}?",
+            ]
+        )
+        return "\n".join(lines).strip()
+
 
 class AnthropicProvider:
     """Anthropic Messages API adapter using structured JSON prompts."""
@@ -425,6 +486,31 @@ class AnthropicProvider:
             "Do not invent facts outside selected notes.\n\n"
             f"Task: {task}\n"
             f"Mode: {mode}\n"
+            f"Budget tokens: {budget}\n\n"
+            f"Selected notes JSON:\n{json.dumps(selected_notes, sort_keys=True)}"
+        )
+        return self._messages_text(model=model, prompt=prompt).strip()
+
+    def synthesize_exploration(self, **kwargs: object) -> str:
+        problem = str(kwargs.get("problem", "")).strip()
+        budget = int(kwargs.get("budget", 3000))
+        model = str(kwargs.get("model", "")).strip()
+        selected_notes = kwargs.get("selected_notes")
+        if not isinstance(selected_notes, list):
+            selected_notes = []
+
+        prompt = (
+            "Synthesize broad KB exploration in markdown with exactly these sections:\n"
+            "## Directly relevant concepts\n"
+            "## Adjacent patterns\n"
+            "## Tensions / tradeoffs\n"
+            "## Possible analogies\n"
+            "## Anti-patterns to avoid\n"
+            "## Open questions\n\n"
+            "Ground every claim in the selected notes and cite note IDs in square brackets like [2026-...]. "
+            "Use adjacent concepts only when the selected notes support them. "
+            "Do not invent facts outside selected notes.\n\n"
+            f"Problem: {problem}\n"
             f"Budget tokens: {budget}\n\n"
             f"Selected notes JSON:\n{json.dumps(selected_notes, sort_keys=True)}"
         )

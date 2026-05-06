@@ -34,8 +34,20 @@ kb reindex [--data-dir <path>]
 Search note titles, summaries, tags, retrieval phrases, and bodies.
 
 ```bash
-kb search <query> [--data-dir <path>] [--topic <topic>] [--type <knowledge-type>] [--budget <tokens>] [--json]
+kb search <query> [--data-dir <path>] [--topic <topic>] [--type <knowledge-type>] [--budget <tokens>] [--json] [--with-citations]
 ```
+
+Use `--with-citations` to include a citation block in human-readable output. JSON output includes a `citation` object on each result.
+
+## `kb explore`
+
+Retrieve broader associations, adjacent patterns, tradeoffs, analogies, anti-patterns, and open questions for ideation.
+
+```bash
+kb explore <problem> [--budget <tokens>] [--json] [--with-citations] [--data-dir <path>]
+```
+
+`kb explore` uses `retrieval.explore_budget_tokens` when `--budget` is omitted. Human-readable and JSON output include citation metadata by default.
 
 ## `kb get`
 
@@ -94,7 +106,7 @@ Rendered review views include:
 Retrieve high-precision context for a task and return a compact cited response.
 
 ```bash
-kb context <task> [--mode <mode>] [--budget <tokens>] [--json] [--data-dir <path>]
+kb context <task> [--mode <mode>] [--budget <tokens>] [--json] [--with-citations] [--data-dir <path>]
 ```
 
 Supported modes:
@@ -106,11 +118,12 @@ Supported modes:
 - `research`
 - `review`
 
+Human-readable and JSON output include citation metadata by default.
+
 ## Current Command Surface
 
 The current shipped CLI does not yet include these planned commands:
 
-- `kb explore`
 - `kb usage`
 - `kb log-use`
 - `kb doctor`

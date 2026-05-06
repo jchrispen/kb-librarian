@@ -86,6 +86,17 @@ def test_kb_add_search_get_and_reindex_smoke(tmp_path):
     assert "status=active" in search_result.stdout
     assert "confidence=medium" in search_result.stdout
 
+    cited_search = run_cli("search", "CLI contract", "--with-citations", "--data-dir", str(tmp_path))
+    assert cited_search.returncode == 0
+    assert "## Source notes" in cited_search.stdout
+    assert "**KB sources:**" in cited_search.stdout
+    assert "title:" in cited_search.stdout
+
+    json_search = run_cli("search", "CLI contract", "--json", "--data-dir", str(tmp_path))
+    assert json_search.returncode == 0
+    assert "\"citation\":" in json_search.stdout
+    assert "\"note_id\":" in json_search.stdout
+
     summary_result = run_cli("get", note_id, "--summary", "--data-dir", str(tmp_path))
     assert summary_result.returncode == 0
     assert "type: technique" in summary_result.stdout
@@ -184,6 +195,7 @@ def test_kb_context_mock_provider_smoke(tmp_path):
     assert result.returncode == 0
     assert "# KB Context" in result.stdout
     assert "## Source notes" in result.stdout
+    assert "**KB sources:**" in result.stdout
     assert note_id in result.stdout
     assert "confidence:" in result.stdout
     assert "status:" in result.stdout
@@ -202,6 +214,68 @@ def test_kb_context_mock_provider_smoke(tmp_path):
     assert json_result.returncode == 0
     assert "\"selected_notes\":" in json_result.stdout
     assert "\"citations\":" in json_result.stdout
+    assert "\"title\":" in json_result.stdout
+
+
+def test_kb_explore_mock_provider_smoke(tmp_path):
+    init_result = run_cli("init", "--data-dir", str(tmp_path))
+    assert init_result.returncode == 0
+
+    config = default_config(tmp_path)
+    config["providers"]["mock"] = {}
+    config["operations"]["synthesize"] = {"provider": "mock", "model": "mock-synthesize"}
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    seed = tmp_path / "seed.md"
+    seed.write_text(
+        "# Agent retrieval heuristic\n\nPrefer compact context and cite source note IDs.\n",
+        encoding="utf-8",
+    )
+
+    add_result = run_cli(
+        "add",
+        "--data-dir",
+        str(tmp_path),
+        "--topic",
+        "agent-systems",
+        "--type",
+        "heuristic",
+        "--from-file",
+        str(seed),
+    )
+    assert add_result.returncode == 0
+    match = NOTE_ID_PATTERN.search(add_result.stdout)
+    assert match is not None
+    note_id = match.group(1)
+
+    result = run_cli(
+        "explore",
+        "agent retrieval alternatives",
+        "--budget",
+        "900",
+        "--data-dir",
+        str(tmp_path),
+    )
+    assert result.returncode == 0
+    assert "# Exploration" in result.stdout
+    assert "## Adjacent patterns" in result.stdout
+    assert "## Source notes" in result.stdout
+    assert "**KB sources:**" in result.stdout
+    assert note_id in result.stdout
+
+    json_result = run_cli(
+        "explore",
+        "agent retrieval alternatives",
+        "--budget",
+        "900",
+        "--json",
+        "--data-dir",
+        str(tmp_path),
+    )
+    assert json_result.returncode == 0
+    assert "\"selected_notes\":" in json_result.stdout
+    assert "\"citations\":" in json_result.stdout
+    assert "\"problem\":" in json_result.stdout
 
 
 def test_kb_get_missing_id_returns_clear_error(tmp_path):
@@ -371,3 +445,7 @@ def test_kb_context_requires_positive_budget(tmp_path):
 
     assert result.returncode == 1
     assert "Context budget must be a positive integer." in result.stderr
+
+    explore_result = run_cli("explore", "agent context task", "--budget", "0", "--data-dir", str(tmp_path))
+    assert explore_result.returncode == 1
+    assert "Explore budget must be a positive integer." in explore_result.stderr

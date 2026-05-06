@@ -119,6 +119,29 @@ def test_mock_provider_synthesize_context_is_grounded():
     assert "## Suggested agent behavior" in result
 
 
+def test_mock_provider_synthesize_exploration_has_explore_sections():
+    provider = MockProvider()
+
+    result = provider.synthesize_exploration(
+        problem="reduce token burn while preserving agent access",
+        budget=3000,
+        selected_notes=[
+            {
+                "note_id": "2026-05-04-token-budget-pattern",
+                "title": "Token budget pattern",
+                "summary": "Use retrieval budgets to preserve useful agent access.",
+                "trust_flags": ["confidence:low"],
+            }
+        ],
+    )
+
+    assert "## Directly relevant concepts" in result
+    assert "## Adjacent patterns" in result
+    assert "## Tensions / tradeoffs" in result
+    assert "## Open questions" in result
+    assert "[2026-05-04-token-budget-pattern]" in result
+
+
 def test_validate_integration_payload():
     result = validate_integration_payload(
         {

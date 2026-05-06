@@ -11,7 +11,7 @@ from typing import Sequence
 
 from kb_librarian import __version__
 from kb_librarian.config import load_config, resolve_data_dir
-from kb_librarian.context import CONTEXT_MODES, build_context
+from kb_librarian.context import CONTEXT_MODES, build_context, build_explore
 from kb_librarian.errors import (
     AmbiguousNoteIdError,
     KBLibrarianError,
@@ -56,6 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_ingest_parser(subcommands)
     _add_review_parser(subcommands)
     _add_context_parser(subcommands)
+    _add_explore_parser(subcommands)
     return parser
 
 
@@ -105,11 +106,26 @@ def _add_context_parser(subcommands: argparse._SubParsersAction[argparse.Argumen
     )
     parser.add_argument("--budget", type=int, help="Context token budget.")
     parser.add_argument("--json", action="store_true", help="Return machine-readable JSON output.")
+    parser.add_argument("--with-citations", action="store_true", help="Include the citation block. Enabled by default.")
     parser.add_argument(
         "--data-dir",
         help="KB data directory. Overrides KB_DATA_DIR and configured defaults.",
     )
     parser.set_defaults(handler=_handle_context)
+
+
+def _add_explore_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subcommands.add_parser(
+        "explore",
+        help="Return broader associations and ideas with source citations.",
+        description="Retrieve higher-recall exploration context for ideation, alternatives, and adjacent concepts.",
+    )
+    parser.add_argument("problem", help="Problem or idea space used for broad exploration.")
+    parser.add_argument("--budget", type=int, help="Exploration token budget.")
+    parser.add_argument("--json", action="store_true", help="Return machine-readable JSON output.")
+    parser.add_argument("--with-citations", action="store_true", help="Include the citation block. Enabled by default.")
+    parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
+    parser.set_defaults(handler=_handle_explore)
 
 
 def _add_add_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -147,6 +163,7 @@ def _add_search_parser(subcommands: argparse._SubParsersAction[argparse.Argument
     parser.add_argument("--type", dest="knowledge_type", help="Knowledge type filter.")
     parser.add_argument("--budget", type=int, help="Approximate response token budget.")
     parser.add_argument("--json", action="store_true", help="Return machine-readable JSON output.")
+    parser.add_argument("--with-citations", action="store_true", help="Include a citation block in human-readable output.")
     parser.set_defaults(handler=_handle_search)
 
 
@@ -341,13 +358,66 @@ def _handle_context(args: argparse.Namespace) -> int:
     if result.synthesis_markdown:
         print(result.synthesis_markdown)
         print("")
-    print("## Source notes")
-    for item in result.selected_notes:
-        trust_text = ", ".join(item.trust_flags) if item.trust_flags else "ok"
-        print(
-            f"- [{item.note_id}]({item.path}) — confidence: {item.confidence}, "
-            f"status: {item.status}, trust: {trust_text}"
-        )
+    _print_citation_block(result.citations)
+    return 0
+
+
+def _handle_explore(args: argparse.Namespace) -> int:
+    data_dir = resolve_data_dir(args.data_dir)
+    initialize_data_dir(data_dir)
+    config = load_config(data_dir)
+
+    budget = args.budget if args.budget is not None else int(config["retrieval"]["explore_budget_tokens"])
+    if budget <= 0:
+        raise KBLibrarianError("Explore budget must be a positive integer.")
+
+    result = build_explore(
+        data_dir,
+        config=config,
+        problem=str(args.problem).strip(),
+        budget=budget,
+    )
+
+    if args.json:
+        payload = {
+            "problem": result.problem,
+            "budget": result.budget,
+            "message": result.message,
+            "synthesis_markdown": result.synthesis_markdown,
+            "selected_notes": [
+                {
+                    "note_id": item.note_id,
+                    "title": item.title,
+                    "summary": item.summary,
+                    "topic": item.topic,
+                    "knowledge_type": item.knowledge_type,
+                    "status": item.status,
+                    "confidence": item.confidence,
+                    "updated": item.updated,
+                    "path": item.path,
+                    "excerpt": item.excerpt,
+                    "score": item.score,
+                    "reasons": item.reasons,
+                    "trust_flags": item.trust_flags,
+                }
+                for item in result.selected_notes
+            ],
+            "citations": result.citations,
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if result.message:
+        print(result.message)
+        print(f"Try: kb search {json.dumps(result.problem)}")
+        return 0
+
+    print("# Exploration")
+    print("")
+    if result.synthesis_markdown:
+        print(result.synthesis_markdown)
+        print("")
+    _print_citation_block(result.citations)
     return 0
 
 
@@ -447,10 +517,20 @@ def _handle_search(args: argparse.Namespace) -> int:
         )
     )
     budget = args.budget if args.budget is not None else int(retrieval["default_budget_tokens"])
+    if budget <= 0:
+        raise KBLibrarianError("Search budget must be a positive integer.")
     limited = _apply_budget(scored, budget)
+    citations = [_search_citation(item, data_dir=data_dir) for item in limited]
 
     if args.json:
-        print(json.dumps(limited, indent=2, sort_keys=True))
+        payload = [
+            {
+                **item,
+                "citation": _search_citation(item, data_dir=data_dir),
+            }
+            for item in limited
+        ]
+        print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
 
     if not limited:
@@ -470,6 +550,8 @@ def _handle_search(args: argparse.Namespace) -> int:
         print(f'summary: {item["summary"]}')
         print(f'path: {item["path"]}')
         print("")
+    if args.with_citations:
+        _print_citation_block(citations)
     return 0
 
 
@@ -671,6 +753,47 @@ def _apply_budget(results: list[dict[str, object]], budget: int) -> list[dict[st
 def _estimate_result_tokens(result: dict[str, object]) -> int:
     text = f'{result.get("title", "")} {result.get("summary", "")}'
     return max(1, len(text.split()) + 16)
+
+
+def _search_citation(item: dict[str, object], *, data_dir: Path) -> dict[str, str]:
+    path = Path(str(item.get("path", "")))
+    try:
+        rendered_path = path.relative_to(data_dir).as_posix()
+    except ValueError:
+        rendered_path = path.as_posix()
+    return {
+        "note_id": str(item.get("id", "")),
+        "path": rendered_path,
+        "title": str(item.get("title", "")),
+        "status": str(item.get("status", "")),
+        "confidence": str(item.get("confidence", "")),
+    }
+
+
+def _print_citation_block(citations: list[dict[str, str]]) -> None:
+    print("## Source notes")
+    for citation in citations:
+        print(
+            "- [{note_id}]({path}) — title: {title}; confidence: {confidence}; status: {status}".format(
+                note_id=citation["note_id"],
+                path=citation["path"],
+                title=citation["title"],
+                confidence=citation["confidence"],
+                status=citation["status"],
+            )
+        )
+    print("")
+    source_refs = ", ".join(
+        "[{note_id}]({path}) (confidence: {confidence}, status: {status})".format(
+            note_id=citation["note_id"],
+            path=citation["path"],
+            confidence=citation["confidence"],
+            status=citation["status"],
+        )
+        for citation in citations
+    )
+    print("---")
+    print(f"**KB sources:** {source_refs}")
 
 
 def _print_reindex_result(result: ReindexResult) -> None:
