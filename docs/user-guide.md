@@ -126,6 +126,14 @@ This rebuilds generated artifacts such as:
 - `.kb/stats.json`
 - `.kb/fts.sqlite`
 
+To detect overlapping notes and queue compaction work:
+
+```bash
+kb reindex --scan-clusters --data-dir /path/to/kb
+```
+
+Cluster scanning respects `review.duplicate_cluster_threshold` and `review.compaction_cooldown_days`. It creates review items only; it does not rewrite notes.
+
 ## Search and Inspect Notes
 
 Use `kb search` for precise lookup:
@@ -241,12 +249,21 @@ Review items are stored in `review/review-items.json` with stable IDs, status, p
 
 - `review/pending-classification.md`
 - `review/pending-merge.md`
+- `review/pending-compaction.md`
 - `review/disputes.md`
 - `review/search-misses.md`
 
 `kb review` and `kb review list` read from `review/review-items.json`, hide resolved items from default output, hide deferred items until due, and bound the number of listed items using `review.max_review_items_per_run`. If a Phase 1 KB only has markdown queues, the first review run imports those entries into durable state and rerenders the queue files.
 
 Repeated or explicitly reported search misses become `searchmiss` review items. Accepting a search-miss item records a resolution note; it does not create or rewrite canonical notes automatically.
+
+Compaction cluster items can be turned into proposal drafts:
+
+```bash
+kb compact <topic-or-cluster> --data-dir /path/to/kb
+```
+
+The target can be a topic name, a compaction review item ID, or a `cluster-...` ID from `review/pending-compaction.md`. The command stores provider-drafted frontmatter, body markdown, source-note dispositions, and a diff summary as another pending compaction review item. Applying compaction is later review-gated work; this command does not mutate canonical notes.
 
 Explain one review item:
 
@@ -285,7 +302,7 @@ For `searchmiss` items, provide a resolution note:
 kb review accept <item-id> --resolution-note "Added retrieval phrase and topic seed note." --data-dir /path/to/kb
 ```
 
-In the current shipped CLI, accept actions are supported for classification, merge, dispute, and search-miss items. Duplicate and unsupported-file items should be handled with `reject` or `defer`.
+In the current shipped CLI, accept actions are supported for classification, merge, dispute, and search-miss items. Compaction, duplicate, and unsupported-file items should be handled with `reject` or `defer`.
 
 ## Recommended Early Workflow
 
@@ -298,4 +315,5 @@ In the current shipped CLI, accept actions are supported for classification, mer
 7. Use `kb explore` when you need alternatives or adjacent ideas.
 8. Run `kb log-use` after citing a note in agent work.
 9. Run `kb usage` periodically to inspect retrieval and note-use signals.
-10. Check `kb review` periodically for classification, merge, dispute, search-miss, duplicate, and unsupported-file items.
+10. Run `kb reindex --scan-clusters` periodically when note overlap is likely.
+11. Check `kb review` periodically for classification, merge, compaction, dispute, search-miss, duplicate, and unsupported-file items.

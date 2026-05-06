@@ -130,6 +130,56 @@ def test_kb_add_search_get_and_reindex_smoke(tmp_path):
     assert ".kb/fts.sqlite" in reindex_result.stdout
 
 
+def test_kb_reindex_scan_clusters_and_compact_smoke(tmp_path):
+    init_result = run_cli("init", "--data-dir", str(tmp_path))
+    assert init_result.returncode == 0
+
+    config = default_config(tmp_path)
+    config["providers"]["mock"] = {}
+    config["operations"]["compact"] = {"provider": "mock", "model": "mock-compact"}
+    config["review"]["duplicate_cluster_threshold"] = 2
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    for suffix in ("a", "b"):
+        source = tmp_path / f"agent-context-{suffix}.md"
+        source.write_text(
+            "# Agent context retrieval\n\n"
+            "Prefer compact task-shaped context before loading full notes. "
+            "Cite source note IDs in agent responses.\n",
+            encoding="utf-8",
+        )
+        add_result = run_cli(
+            "add",
+            "--data-dir",
+            str(tmp_path),
+            "--topic",
+            "agent-systems",
+            "--type",
+            "heuristic",
+            "--from-file",
+            str(source),
+        )
+        assert add_result.returncode == 0
+
+    scan_result = run_cli("reindex", "--scan-clusters", "--data-dir", str(tmp_path))
+    assert scan_result.returncode == 0
+    assert "Compaction scan: 1 cluster(s), 1 new review item(s)." in scan_result.stdout
+
+    rendered = (tmp_path / "review" / "pending-compaction.md").read_text(encoding="utf-8")
+    match = re.search(r"cluster_id: (cluster-[a-f0-9]+)", rendered)
+    assert match is not None
+    cluster_id = match.group(1)
+
+    compact_result = run_cli("compact", cluster_id, "--data-dir", str(tmp_path))
+    assert compact_result.returncode == 0
+    assert "Created compaction proposal" in compact_result.stdout
+    assert "diff_summary:" in compact_result.stdout
+
+    review_result = run_cli("review", "--data-dir", str(tmp_path))
+    assert review_result.returncode == 0
+    assert "compaction: 2" in review_result.stdout
+
+
 def test_kb_add_without_direct_metadata_queues_raw(tmp_path):
     payload = "This is a raw capture that lacks topic/type metadata.\n"
     result = run_cli("add", "--data-dir", str(tmp_path), input_text=payload)

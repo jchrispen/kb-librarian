@@ -132,6 +132,14 @@ Useful ingest settings:
 - `prefer_skip_over_low_value_note`: prefer no note over weak notes
 - `low_confidence_goes_to_review`: route ambiguous classification to review
 
+## Review Settings
+
+Useful review settings:
+
+- `duplicate_cluster_threshold`: minimum overlapping notes required before `kb reindex --scan-clusters` queues a compaction cluster
+- `compaction_cooldown_days`: days before a rejected compaction cluster can be reopened by another scan
+- `max_review_items_per_run`: maximum items shown by default in `kb review`
+
 ## Hooks Flag
 
 For newly created KBs, `kb init --hooks` sets:

@@ -6,12 +6,13 @@ It stores durable knowledge as markdown files in a separate data directory, buil
 
 ## Status
 
-This repository currently ships the Phase 1 core workflow plus Phase 2 daily-use ergonomics:
+This repository currently ships the Phase 1 core workflow, Phase 2 daily-use ergonomics, and the Phase 3a compaction proposal flow:
 
 - `kb init`
 - `kb add`
 - `kb ingest`
 - `kb reindex`
+- `kb compact`
 - `kb search`
 - `kb get`
 - `kb review`
@@ -20,7 +21,7 @@ This repository currently ships the Phase 1 core workflow plus Phase 2 daily-use
 - `kb log-use`
 - `kb usage`
 
-Planned later-phase features such as compaction, doctor diagnostics, and automation templates are documented in the design and implementation plans, but they are not part of the shipped CLI yet.
+Planned later-phase features such as doctor diagnostics, topic reorganization, and automation templates are documented in the design and implementation plans, but they are not part of the shipped CLI yet.
 
 ## What It Does
 
@@ -29,6 +30,7 @@ Planned later-phase features such as compaction, doctor diagnostics, and automat
 - Ingests markdown and text files into candidate notes
 - Preserves review-gated behavior for risky integrations
 - Returns compact, cited context for coding and design tasks
+- Detects overlapping note clusters and drafts reviewable compaction proposals without rewriting notes
 
 ## Install
 
@@ -108,6 +110,7 @@ Important review files:
 - `review/review-items.json`: source of truth for review item IDs, status, payload, and history
 - `review/pending-classification.md`: generated view for classification review
 - `review/pending-merge.md`: generated view for merge proposals
+- `review/pending-compaction.md`: generated view for compaction clusters and proposals
 - `review/disputes.md`: generated view for contradictions
 - `review/search-misses.md`: generated view for repeated or explicitly reported search misses
 - `PREAMBLE.md`: agent-facing retrieval guidance installed by `kb init --hooks`
@@ -117,7 +120,8 @@ Important review files:
 - `kb init`: create the KB directory structure and default config
 - `kb add`: create a note directly, or queue raw input when metadata is incomplete
 - `kb ingest`: process markdown or text files into notes or review items
-- `kb reindex`: rebuild markdown indexes, backlinks, manifest, stats, and lexical index
+- `kb reindex`: rebuild markdown indexes, backlinks, manifest, stats, lexical index, and optionally scan compaction clusters
+- `kb compact`: draft a review-gated canonical note proposal for a topic or cluster
 - `kb search`: search notes by title, summary, tags, retrieval phrases, and body text
 - `kb get`: inspect one note by ID
 - `kb review`: inspect and resolve bounded review queues backed by `review/review-items.json`

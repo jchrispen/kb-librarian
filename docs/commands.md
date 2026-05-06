@@ -25,10 +25,10 @@ Notes:
 
 ## `kb reindex`
 
-Rebuild markdown and lexical indexes from note files.
+Rebuild markdown and lexical indexes from note files. Use `--scan-clusters` to also detect overlapping note clusters and queue compaction review items.
 
 ```bash
-kb reindex [--data-dir <path>]
+kb reindex [--data-dir <path>] [--scan-clusters]
 ```
 
 ## `kb search`
@@ -104,8 +104,19 @@ Rendered review views include:
 
 - `review/pending-classification.md`
 - `review/pending-merge.md`
+- `review/pending-compaction.md`
 - `review/disputes.md`
 - `review/search-misses.md`
+
+## `kb compact`
+
+Draft a canonical compaction proposal for a topic, compaction review item ID, or cluster ID.
+
+```bash
+kb compact <topic-or-cluster> [--json] [--data-dir <path>]
+```
+
+`kb compact` asks the configured `operations.compact` provider to draft frontmatter, body markdown, source-note dispositions, and a diff summary. The draft is stored as a pending `compaction` review item in `review/review-items.json` and rendered in `review/pending-compaction.md`; source notes are not rewritten.
 
 ## `kb context`
 
