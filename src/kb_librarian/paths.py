@@ -35,7 +35,7 @@ STATE_FILES = {
     ".kb/index-manifest.json": {"version": 1, "indexes": {}},
 }
 
-LOG_FILES = (".kb/errors.log",)
+LOG_FILES = (".kb/errors.log", ".kb/usage.log", ".kb/search-misses.log")
 
 
 def config_path(data_dir: Path) -> Path:

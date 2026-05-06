@@ -39,6 +39,13 @@ from kb_librarian.storage import (
     load_note_records,
     normalize_topic_for_path,
 )
+from kb_librarian.usage import (
+    log_note_use,
+    log_retrieval,
+    maybe_log_search_miss,
+    render_usage_summary,
+    summarize_usage,
+)
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -57,6 +64,8 @@ def build_parser() -> argparse.ArgumentParser:
     _add_review_parser(subcommands)
     _add_context_parser(subcommands)
     _add_explore_parser(subcommands)
+    _add_log_use_parser(subcommands)
+    _add_usage_parser(subcommands)
     return parser
 
 
@@ -107,6 +116,7 @@ def _add_context_parser(subcommands: argparse._SubParsersAction[argparse.Argumen
     parser.add_argument("--budget", type=int, help="Context token budget.")
     parser.add_argument("--json", action="store_true", help="Return machine-readable JSON output.")
     parser.add_argument("--with-citations", action="store_true", help="Include the citation block. Enabled by default.")
+    parser.add_argument("--report-miss", action="store_true", help="Record this retrieval as a poor-result search miss.")
     parser.add_argument(
         "--data-dir",
         help="KB data directory. Overrides KB_DATA_DIR and configured defaults.",
@@ -124,6 +134,7 @@ def _add_explore_parser(subcommands: argparse._SubParsersAction[argparse.Argumen
     parser.add_argument("--budget", type=int, help="Exploration token budget.")
     parser.add_argument("--json", action="store_true", help="Return machine-readable JSON output.")
     parser.add_argument("--with-citations", action="store_true", help="Include the citation block. Enabled by default.")
+    parser.add_argument("--report-miss", action="store_true", help="Record this retrieval as a poor-result search miss.")
     parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
     parser.set_defaults(handler=_handle_explore)
 
@@ -164,6 +175,7 @@ def _add_search_parser(subcommands: argparse._SubParsersAction[argparse.Argument
     parser.add_argument("--budget", type=int, help="Approximate response token budget.")
     parser.add_argument("--json", action="store_true", help="Return machine-readable JSON output.")
     parser.add_argument("--with-citations", action="store_true", help="Include a citation block in human-readable output.")
+    parser.add_argument("--report-miss", action="store_true", help="Record this search as a poor-result search miss.")
     parser.set_defaults(handler=_handle_search)
 
 
@@ -217,6 +229,30 @@ def _add_review_parser(subcommands: argparse._SubParsersAction[argparse.Argument
     parser.add_argument("--resolution-note", help="Resolution text for search-miss acceptance.")
     parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
     parser.set_defaults(handler=_handle_review)
+
+
+def _add_log_use_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subcommands.add_parser(
+        "log-use",
+        help="Record that an agent used or cited a note.",
+        description="Append an explicit note-use signal to .kb/usage.log.",
+    )
+    parser.add_argument("id", help="Note ID that was used or cited.")
+    parser.add_argument("--task", help="Optional short task summary.")
+    parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
+    parser.set_defaults(handler=_handle_log_use)
+
+
+def _add_usage_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subcommands.add_parser(
+        "usage",
+        help="Summarize retrieval and note-use signals.",
+        description="Print a concise operational summary from .kb/usage.log and .kb/search-misses.log.",
+    )
+    parser.add_argument("--since", help="Duration such as 7d, 24h, 30m, 2w, or an ISO date.")
+    parser.add_argument("--note", help="Filter usage summary to one note ID.")
+    parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
+    parser.set_defaults(handler=_handle_usage)
 
 
 def _handle_init(args: argparse.Namespace) -> int:
@@ -317,6 +353,29 @@ def _handle_context(args: argparse.Namespace) -> int:
         mode=mode,
         budget=budget,
     )
+    top_score = result.selected_notes[0].score if result.selected_notes else None
+    log_retrieval(
+        data_dir,
+        command="context",
+        query=result.task,
+        task=result.task,
+        mode=result.mode,
+        budget=result.budget,
+        returned_note_ids=[item.note_id for item in result.selected_notes],
+        result_count=len(result.selected_notes),
+        top_score=top_score,
+        synthesis_succeeded=bool(result.synthesis_markdown),
+    )
+    maybe_log_search_miss(
+        data_dir,
+        command="context",
+        query=result.task,
+        task=result.task,
+        result_count=len(result.selected_notes),
+        top_score=top_score,
+        filters={"mode": result.mode},
+        report_miss=bool(args.report_miss),
+    )
 
     if args.json:
         payload = {
@@ -376,6 +435,28 @@ def _handle_explore(args: argparse.Namespace) -> int:
         config=config,
         problem=str(args.problem).strip(),
         budget=budget,
+    )
+    top_score = result.selected_notes[0].score if result.selected_notes else None
+    log_retrieval(
+        data_dir,
+        command="explore",
+        query=result.problem,
+        task=result.problem,
+        budget=result.budget,
+        returned_note_ids=[item.note_id for item in result.selected_notes],
+        result_count=len(result.selected_notes),
+        top_score=top_score,
+        synthesis_succeeded=bool(result.synthesis_markdown),
+    )
+    maybe_log_search_miss(
+        data_dir,
+        command="explore",
+        query=result.problem,
+        task=result.problem,
+        result_count=len(result.selected_notes),
+        top_score=top_score,
+        filters={},
+        report_miss=bool(args.report_miss),
     )
 
     if args.json:
@@ -521,6 +602,28 @@ def _handle_search(args: argparse.Namespace) -> int:
         raise KBLibrarianError("Search budget must be a positive integer.")
     limited = _apply_budget(scored, budget)
     citations = [_search_citation(item, data_dir=data_dir) for item in limited]
+    top_score = float(limited[0]["score"]) if limited else None
+    filters = {"topic": args.topic, "knowledge_type": args.knowledge_type}
+    log_retrieval(
+        data_dir,
+        command="search",
+        query=str(args.query),
+        budget=budget,
+        returned_note_ids=[str(item.get("id", "")) for item in limited],
+        result_count=len(limited),
+        top_score=top_score,
+        filters=filters,
+        synthesis_succeeded=None,
+    )
+    maybe_log_search_miss(
+        data_dir,
+        command="search",
+        query=str(args.query),
+        result_count=len(limited),
+        top_score=top_score,
+        filters=filters,
+        report_miss=bool(args.report_miss),
+    )
 
     if args.json:
         payload = [
@@ -582,6 +685,26 @@ def _handle_get(args: argparse.Namespace) -> int:
         return 0
 
     print(record.path.read_text(encoding="utf-8"), end="")
+    return 0
+
+
+def _handle_log_use(args: argparse.Namespace) -> int:
+    data_dir = resolve_data_dir(args.data_dir)
+    initialize_data_dir(data_dir)
+    _require_note_id(data_dir, str(args.id))
+    log_note_use(data_dir, note_id=str(args.id), task=args.task)
+    print(f"Logged use of note {args.id}.")
+    return 0
+
+
+def _handle_usage(args: argparse.Namespace) -> int:
+    data_dir = resolve_data_dir(args.data_dir)
+    initialize_data_dir(data_dir)
+    note_id = str(args.note).strip() if args.note else None
+    if note_id:
+        _require_note_id(data_dir, note_id)
+    summary = summarize_usage(data_dir, since=args.since, note_id=note_id)
+    print(render_usage_summary(summary), end="")
     return 0
 
 
@@ -794,6 +917,16 @@ def _print_citation_block(citations: list[dict[str, str]]) -> None:
     )
     print("---")
     print(f"**KB sources:** {source_refs}")
+
+
+def _require_note_id(data_dir: Path, note_id: str) -> None:
+    records = load_note_records(data_dir, validate=True)
+    matches = [record for record in records if record.note_id == note_id]
+    if not matches:
+        raise NoteNotFoundError(f"Note ID {note_id!r} was not found.")
+    if len(matches) > 1:
+        paths = ", ".join(str(record.path) for record in sorted(matches, key=lambda item: str(item.path)))
+        raise AmbiguousNoteIdError(f"Note ID {note_id!r} is ambiguous across: {paths}")
 
 
 def _print_reindex_result(result: ReindexResult) -> None:

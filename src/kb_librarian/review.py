@@ -210,6 +210,64 @@ def add_review_item(
     return item_id
 
 
+def upsert_search_miss_review_item(
+    data_dir: Path,
+    *,
+    title: str,
+    payload: Mapping[str, Any],
+    priority: str,
+    created: str,
+    fingerprint: str,
+) -> str | None:
+    """Create or refresh a pending search-miss review item."""
+
+    definition = QUEUE_DEFINITIONS["searchmiss"]
+    payload_dict = dict(payload)
+    state = ensure_review_state(data_dir, render=False)
+    existing = _find_existing_item(state, fingerprint)
+    if existing is not None:
+        if str(existing.get("status")) in RESOLVED_STATUSES:
+            return None
+        existing["title"] = title.strip() or str(existing["title"])
+        existing["priority"] = priority
+        existing["payload"] = {**payload_dict, "fingerprint": fingerprint}
+        existing["updated"] = date.today().isoformat()
+        history = existing.get("history")
+        if isinstance(history, list):
+            history.append(
+                {
+                    "at": datetime.now().isoformat(timespec="seconds"),
+                    "action": "updated",
+                    "source": ".kb/search-misses.log",
+                }
+            )
+        _write_state(review_state_path(data_dir), state)
+        render_review_queues(data_dir, state=state)
+        return str(existing["id"])
+
+    item_id = _append_item(
+        state,
+        queue="searchmiss",
+        title=title,
+        target_notes=[],
+        proposed_action=definition.proposed_action,
+        payload={**payload_dict, "fingerprint": fingerprint},
+        priority=priority,
+        created=created,
+        history=[
+            {
+                "at": datetime.now().isoformat(timespec="seconds"),
+                "action": "created",
+                "source": ".kb/search-misses.log",
+            }
+        ],
+        fingerprint=fingerprint,
+    )
+    _write_state(review_state_path(data_dir), state)
+    render_review_queues(data_dir, state=state)
+    return item_id
+
+
 def queue_duplicate_review_item(
     data_dir: Path,
     *,
@@ -900,6 +958,15 @@ def _render_item_markdown(item: Mapping[str, Any]) -> list[str]:
     elif queue == "searchmiss":
         _extend_if_present(lines, "- query", payload.get("query") or item.get("title"))
         _extend_if_present(lines, "- misses", payload.get("misses"))
+        _extend_if_present(lines, "- first_seen", payload.get("first_seen"))
+        _extend_if_present(lines, "- last_seen", payload.get("last_seen"))
+        commands = payload.get("commands")
+        if isinstance(commands, list) and commands:
+            _extend_if_present(lines, "- commands", ", ".join(str(command) for command in commands))
+        reasons = payload.get("reasons")
+        if isinstance(reasons, dict) and reasons:
+            rendered = ", ".join(f"{key}={value}" for key, value in sorted(reasons.items()))
+            _extend_if_present(lines, "- reasons", rendered)
 
     lines.extend(["", ""])
     return lines

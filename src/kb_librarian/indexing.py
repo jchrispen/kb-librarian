@@ -10,6 +10,7 @@ from typing import Any, Iterable, Mapping
 
 from kb_librarian.search_index import build_lexical_index
 from kb_librarian.storage import NOTE_ID_REFERENCE_PATTERN, NoteRecord, ensure_unique_note_ids, load_note_records
+from kb_librarian.usage import usage_stats_payload
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,7 @@ def reindex_data_dir(data_dir: Path) -> ReindexResult:
     stats_payload = {
         "notes": len(records),
         "topics": len(grouped),
+        "usage": usage_stats_payload(data_dir),
     }
     _write_json_if_changed(stats_path, stats_payload)
     artifacts.append(stats_path)

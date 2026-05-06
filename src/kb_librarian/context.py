@@ -12,6 +12,7 @@ from kb_librarian.indexing import reindex_data_dir
 from kb_librarian.providers import LLMProvider, operation_route, provider_from_config
 from kb_librarian.search_index import query_candidates, tokenize_query
 from kb_librarian.storage import NOTE_ID_REFERENCE_PATTERN, NoteRecord, load_note_records
+from kb_librarian.usage import note_usage_counts
 
 CONTEXT_MODES = ("coding", "architecture", "debugging", "writing", "research", "review")
 VALID_CONTEXT_MODES = set(CONTEXT_MODES)
@@ -135,7 +136,7 @@ def build_context(
         )
 
     by_id = {record.note_id: record for record in records}
-    usage_counts = _load_usage_counts(data_dir)
+    usage_counts = note_usage_counts(data_dir)
     tokens = tokenize_query(task)
 
     scored: list[ContextSelection] = []
@@ -825,20 +826,3 @@ def _extract_ids_from_value(value: Any, *, into: set[str]) -> None:
         for nested in value:
             _extract_ids_from_value(nested, into=into)
 
-
-def _load_usage_counts(data_dir: Path) -> dict[str, int]:
-    usage_path = data_dir / ".kb" / "usage.log"
-    if not usage_path.exists():
-        return {}
-
-    counts: dict[str, int] = {}
-    try:
-        lines = usage_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return {}
-
-    for line in lines:
-        for token in line.split():
-            if len(token) >= 11 and token[4:5] == "-" and token[7:8] == "-":
-                counts[token] = counts.get(token, 0) + 1
-    return counts

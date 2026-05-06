@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -50,6 +51,8 @@ def test_kb_init_smoke_and_idempotency(tmp_path):
     assert first.returncode == 0
     assert "Initialized KB at" in first.stdout
     assert (tmp_path / ".kb" / "config.yaml").is_file()
+    assert (tmp_path / ".kb" / "usage.log").is_file()
+    assert (tmp_path / ".kb" / "search-misses.log").is_file()
     assert (tmp_path / "review" / "pending-merge.md").is_file()
     assert second.returncode == 0
     assert "Already initialized" in second.stdout
@@ -276,6 +279,91 @@ def test_kb_explore_mock_provider_smoke(tmp_path):
     assert "\"selected_notes\":" in json_result.stdout
     assert "\"citations\":" in json_result.stdout
     assert "\"problem\":" in json_result.stdout
+
+
+def test_kb_log_use_and_usage_smoke(tmp_path):
+    init_result = run_cli("init", "--data-dir", str(tmp_path))
+    assert init_result.returncode == 0
+
+    source = tmp_path / "seed.md"
+    source.write_text(
+        "# CLI usage logging\n\nPrefer logging note usage after citing a source note.\n",
+        encoding="utf-8",
+    )
+    add_result = run_cli(
+        "add",
+        "--data-dir",
+        str(tmp_path),
+        "--topic",
+        "agent-systems",
+        "--type",
+        "technique",
+        "--from-file",
+        str(source),
+    )
+    match = NOTE_ID_PATTERN.search(add_result.stdout)
+    assert match is not None
+    note_id = match.group(1)
+
+    search_result = run_cli("search", "usage logging", "--data-dir", str(tmp_path))
+    assert search_result.returncode == 0
+    assert note_id in search_result.stdout
+
+    log_use_result = run_cli(
+        "log-use",
+        note_id,
+        "--task",
+        "cited in a CLI smoke test",
+        "--data-dir",
+        str(tmp_path),
+    )
+    assert log_use_result.returncode == 0
+    assert f"Logged use of note {note_id}." in log_use_result.stdout
+
+    usage_result = run_cli("usage", "--since", "7d", "--data-dir", str(tmp_path))
+    assert usage_result.returncode == 0
+    assert "Usage summary" in usage_result.stdout
+    assert "retrievals: 1" in usage_result.stdout
+    assert "logged uses: 1" in usage_result.stdout
+    assert note_id in usage_result.stdout
+
+    note_usage_result = run_cli("usage", "--note", note_id, "--data-dir", str(tmp_path))
+    assert note_usage_result.returncode == 0
+    assert f"note: {note_id}" in note_usage_result.stdout
+
+    events = [
+        json.loads(line)
+        for line in (tmp_path / ".kb" / "usage.log").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["event"] for event in events] == ["retrieval", "note-use"]
+    assert events[0]["command"] == "search"
+    assert events[0]["returned_note_ids"] == [note_id]
+    assert "Prefer logging note usage" not in json.dumps(events)
+
+
+def test_kb_search_misses_promote_to_review_smoke(tmp_path):
+    init_result = run_cli("init", "--data-dir", str(tmp_path))
+    assert init_result.returncode == 0
+
+    for _ in range(3):
+        result = run_cli("search", "quantum gardening", "--data-dir", str(tmp_path))
+        assert result.returncode == 0
+        assert "No results." in result.stdout
+
+    miss_events = [
+        json.loads(line)
+        for line in (tmp_path / ".kb" / "search-misses.log").read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(miss_events) == 3
+    assert {event["reason"] for event in miss_events} == {"zero-results"}
+
+    rendered = (tmp_path / "review" / "search-misses.md").read_text(encoding="utf-8")
+    assert "quantum gardening" in rendered
+    assert "- misses: 3" in rendered
+
+    review_result = run_cli("review", "--data-dir", str(tmp_path))
+    assert review_result.returncode == 0
+    assert "searchmiss: 1" in review_result.stdout
 
 
 def test_kb_get_missing_id_returns_clear_error(tmp_path):
