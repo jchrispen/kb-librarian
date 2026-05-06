@@ -21,6 +21,7 @@ DIRECTORIES = (
 REVIEW_QUEUE_FILES = (
     "review/pending-classification.md",
     "review/pending-merge.md",
+    "review/pending-compaction.md",
     "review/disputes.md",
     "review/search-misses.md",
 )

@@ -11,6 +11,7 @@ from typing import Sequence
 
 from kb_librarian import __version__
 from kb_librarian.config import load_config, resolve_data_dir
+from kb_librarian.compaction import draft_compaction_proposal
 from kb_librarian.context import CONTEXT_MODES, build_context, build_explore
 from kb_librarian.errors import (
     AmbiguousNoteIdError,
@@ -62,6 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_get_parser(subcommands)
     _add_ingest_parser(subcommands)
     _add_review_parser(subcommands)
+    _add_compact_parser(subcommands)
     _add_context_parser(subcommands)
     _add_explore_parser(subcommands)
     _add_log_use_parser(subcommands)
@@ -159,6 +161,11 @@ def _add_reindex_parser(subcommands: argparse._SubParsersAction[argparse.Argumen
         description="Regenerate INDEX.md, topic indexes, backlinks, manifest, stats, and lexical index.",
     )
     parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
+    parser.add_argument(
+        "--scan-clusters",
+        action="store_true",
+        help="Detect overlapping note clusters and queue compaction review items.",
+    )
     parser.set_defaults(handler=_handle_reindex)
 
 
@@ -230,6 +237,18 @@ def _add_review_parser(subcommands: argparse._SubParsersAction[argparse.Argument
     parser.add_argument("--resolution-note", help="Resolution text for search-miss acceptance.")
     parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
     parser.set_defaults(handler=_handle_review)
+
+
+def _add_compact_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subcommands.add_parser(
+        "compact",
+        help="Draft a review-gated compaction proposal for a topic or cluster.",
+        description="Draft a canonical note proposal without rewriting source notes.",
+    )
+    parser.add_argument("target", help="Topic name, compaction review item ID, or cluster ID.")
+    parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
+    parser.add_argument("--json", action="store_true", help="Return machine-readable proposal metadata.")
+    parser.set_defaults(handler=_handle_compact)
 
 
 def _add_log_use_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -557,8 +576,34 @@ def _handle_add(args: argparse.Namespace) -> int:
 def _handle_reindex(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
-    result = reindex_data_dir(data_dir)
+    config = load_config(data_dir)
+    result = reindex_data_dir(data_dir, config=config, scan_clusters=bool(args.scan_clusters))
     _print_reindex_result(result)
+    return 0
+
+
+def _handle_compact(args: argparse.Namespace) -> int:
+    data_dir = resolve_data_dir(args.data_dir)
+    initialize_data_dir(data_dir)
+    config = load_config(data_dir)
+    result = draft_compaction_proposal(data_dir, config=config, target=str(args.target))
+    if args.json:
+        payload = {
+            "review_item_id": result.review_item_id,
+            "cluster_id": result.cluster_id,
+            "source_note_ids": result.source_note_ids,
+            "created": result.created,
+            "diff_summary": result.draft.diff_summary,
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    verb = "Created" if result.created else "Existing"
+    print(f"{verb} compaction proposal {result.review_item_id}.")
+    print(f"cluster_id: {result.cluster_id}")
+    print(f"source_notes: {', '.join(result.source_note_ids)}")
+    print(f"diff_summary: {result.draft.diff_summary}")
+    print(f"Review: kb review explain {result.review_item_id} --data-dir {data_dir}")
     return 0
 
 
@@ -938,6 +983,16 @@ def _print_reindex_result(result: ReindexResult) -> None:
     print(
         f"Reindexed {result.note_count} notes across {result.topic_count} topics using {result.index_backend}."
     )
+    if result.compaction_clusters:
+        print(
+            "Compaction scan: "
+            f"{result.compaction_clusters} cluster(s), "
+            f"{len(result.compaction_review_items or [])} new review item(s)."
+        )
+        if result.compaction_review_items:
+            print("compaction_review_item_ids:")
+            for item_id in result.compaction_review_items:
+                print(f"- {item_id}")
     for artifact in result.artifacts:
         print(str(artifact))
 

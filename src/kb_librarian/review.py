@@ -82,6 +82,16 @@ QUEUE_DEFINITIONS: dict[str, QueueDefinition] = {
         proposed_action="review missed search result",
         order=40,
     ),
+    "compaction": QueueDefinition(
+        queue="compaction",
+        count_key="compaction",
+        id_prefix="compaction",
+        file_name="pending-compaction.md",
+        file_title="Pending Compaction",
+        priority="medium",
+        proposed_action="draft or review compaction proposal",
+        order=45,
+    ),
     "duplicate": QueueDefinition(
         queue="duplicate",
         count_key="duplicate",
@@ -321,6 +331,129 @@ def queue_unsupported_file_review_item(data_dir: Path, *, source_path: Path) -> 
     )
 
 
+def queue_compaction_cluster_review_item(
+    data_dir: Path,
+    *,
+    cluster_id: str,
+    source_note_ids: list[str],
+    title: str,
+    reason: str,
+    evidence: list[str],
+    suggested_canonical_title: str,
+    risk: str,
+    cluster_fingerprint: str,
+    cooldown_days: int,
+) -> str | None:
+    payload: dict[str, Any] = {
+        "kind": "cluster",
+        "cluster_id": cluster_id,
+        "cluster_note_ids": sorted(source_note_ids),
+        "source_note_ids": sorted(source_note_ids),
+        "reason": reason,
+        "evidence": list(evidence),
+        "suggested_canonical_title": suggested_canonical_title,
+        "risk": risk,
+        "cluster_fingerprint": cluster_fingerprint,
+    }
+    fingerprint = f"compaction-cluster:{cluster_fingerprint}"
+    state = ensure_review_state(data_dir, render=False)
+    existing = _find_existing_item(state, fingerprint)
+    if existing is not None:
+        status = str(existing.get("status"))
+        if status != "rejected":
+            return None
+        if not _cooldown_elapsed(str(existing.get("updated") or existing.get("created")), cooldown_days):
+            return None
+        existing["status"] = "pending"
+        existing["priority"] = _compaction_priority(risk, proposal=False)
+        existing["title"] = title
+        existing["target_notes"] = sorted(source_note_ids)
+        existing["proposed_action"] = QUEUE_DEFINITIONS["compaction"].proposed_action
+        existing["payload"] = {**payload, "fingerprint": fingerprint}
+        existing["updated"] = date.today().isoformat()
+        history = existing.get("history")
+        if not isinstance(history, list):
+            history = []
+            existing["history"] = history
+        history.append(
+            {
+                "at": datetime.now().isoformat(timespec="seconds"),
+                "action": "reopened",
+                "source": "cluster-scan",
+                "note": f"Cooldown elapsed after {cooldown_days} day(s).",
+            }
+        )
+        _write_state(review_state_path(data_dir), state)
+        render_review_queues(data_dir, state=state)
+        return str(existing["id"])
+
+    item_id = _append_item(
+        state,
+        queue="compaction",
+        title=title,
+        target_notes=sorted(source_note_ids),
+        proposed_action=QUEUE_DEFINITIONS["compaction"].proposed_action,
+        payload={**payload, "fingerprint": fingerprint},
+        priority=_compaction_priority(risk, proposal=False),
+        created=date.today().isoformat(),
+        history=[
+            {
+                "at": datetime.now().isoformat(timespec="seconds"),
+                "action": "created",
+                "source": "cluster-scan",
+            }
+        ],
+        fingerprint=fingerprint,
+    )
+    _write_state(review_state_path(data_dir), state)
+    render_review_queues(data_dir, state=state)
+    return item_id
+
+
+def queue_compaction_proposal_review_item(
+    data_dir: Path,
+    *,
+    cluster_id: str,
+    source_note_ids: list[str],
+    title: str,
+    draft: Any,
+    evidence: list[str],
+    cluster_fingerprint: str,
+) -> str | None:
+    dispositions = [
+        {
+            "note_id": str(item.note_id),
+            "recommendation": str(item.recommendation),
+            "rationale": str(item.rationale),
+        }
+        for item in getattr(draft, "dispositions", [])
+    ]
+    payload: dict[str, Any] = {
+        "kind": "proposal",
+        "cluster_id": cluster_id,
+        "source_note_ids": sorted(source_note_ids),
+        "cluster_fingerprint": cluster_fingerprint,
+        "evidence": list(evidence),
+        "frontmatter": dict(getattr(draft, "frontmatter")),
+        "body": str(getattr(draft, "body")),
+        "dispositions": dispositions,
+        "diff_summary": str(getattr(draft, "diff_summary")),
+        "suggested_canonical_title": str(getattr(draft, "frontmatter", {}).get("title", "")),
+        "risk": "medium",
+    }
+    fingerprint = f"compaction-proposal:{cluster_fingerprint}"
+    return add_review_item(
+        data_dir,
+        queue="compaction",
+        title=title,
+        target_notes=sorted(source_note_ids),
+        proposed_action="review compaction proposal",
+        payload=payload,
+        priority="medium",
+        fingerprint=fingerprint,
+    )
+
+
 def explain_review_item(data_dir: Path, item_id: str) -> str:
     state = ensure_review_state(data_dir, render=True)
     item = _find_item_by_id(state, item_id)
@@ -553,6 +686,7 @@ def render_review_summary(
         f"merge: {counts.get('merge', 0)}",
         f"dispute: {counts.get('dispute', 0)}",
         f"searchmiss: {counts.get('searchmiss', 0)}",
+        f"compaction: {counts.get('compaction', 0)}",
         f"duplicate: {counts.get('duplicate', 0)}",
         f"unsupported_file: {counts.get('unsupported_file', 0)}",
     ]
@@ -967,6 +1101,37 @@ def _render_item_markdown(item: Mapping[str, Any]) -> list[str]:
         if isinstance(reasons, dict) and reasons:
             rendered = ", ".join(f"{key}={value}" for key, value in sorted(reasons.items()))
             _extend_if_present(lines, "- reasons", rendered)
+    elif queue == "compaction":
+        _extend_if_present(lines, "- kind", payload.get("kind"))
+        _extend_if_present(lines, "- cluster_id", payload.get("cluster_id"))
+        _extend_if_present(lines, "- suggested_canonical_title", payload.get("suggested_canonical_title"))
+        _extend_if_present(lines, "- risk", payload.get("risk"))
+        _extend_if_present(lines, "- reason", payload.get("reason"))
+        evidence = payload.get("evidence")
+        if isinstance(evidence, list) and evidence:
+            lines.append("- evidence:")
+            lines.extend(f"  - {item}" for item in evidence[:10])
+        diff_summary = payload.get("diff_summary")
+        if isinstance(diff_summary, str) and diff_summary.strip():
+            _extend_if_present(lines, "- diff_summary", diff_summary)
+        dispositions = payload.get("dispositions")
+        if isinstance(dispositions, list) and dispositions:
+            lines.append("- dispositions:")
+            for disposition in dispositions:
+                if not isinstance(disposition, Mapping):
+                    continue
+                note_id = disposition.get("note_id")
+                recommendation = disposition.get("recommendation")
+                rationale = disposition.get("rationale")
+                lines.append(f"  - {note_id}: {recommendation} - {rationale}")
+        frontmatter = payload.get("frontmatter")
+        if isinstance(frontmatter, Mapping) and frontmatter:
+            lines.extend(["- proposed_frontmatter:", "```yaml"])
+            lines.append(json.dumps(frontmatter, indent=2, sort_keys=True))
+            lines.append("```")
+        body = payload.get("body")
+        if isinstance(body, str) and body.strip():
+            lines.extend(["- proposed_body:", "```markdown", body.rstrip("\n"), "```"])
 
     lines.extend(["", ""])
     return lines
@@ -986,7 +1151,16 @@ def _summary_item(item: Mapping[str, Any]) -> ReviewSummaryItem:
 def _item_summary(item: Mapping[str, Any]) -> str:
     payload = item.get("payload", {})
     if isinstance(payload, dict):
-        for key in ("candidate_title", "title", "source_name", "source_path", "query", "reason", "rationale"):
+        for key in (
+            "suggested_canonical_title",
+            "candidate_title",
+            "title",
+            "source_name",
+            "source_path",
+            "query",
+            "reason",
+            "rationale",
+        ):
             value = str(payload.get(key, "")).strip()
             if value:
                 return value
@@ -1011,6 +1185,24 @@ def _date_part(value: str) -> str:
     if compact:
         return f"{compact.group(1)}-{compact.group(2)}-{compact.group(3)}"
     return date.today().isoformat()
+
+
+def _cooldown_elapsed(updated: str, days: int) -> bool:
+    try:
+        updated_date = date.fromisoformat(_date_part(updated))
+    except ValueError:
+        return False
+    return (date.today() - updated_date).days >= max(0, days)
+
+
+def _compaction_priority(risk: str, *, proposal: bool) -> str:
+    if proposal:
+        return "medium"
+    if risk == "high":
+        return "high"
+    if risk == "low":
+        return "low"
+    return "medium"
 
 
 def _summary_from_block(block: str, patterns: tuple[str, ...]) -> str:

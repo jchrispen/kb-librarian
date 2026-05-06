@@ -19,9 +19,16 @@ class ReindexResult:
     note_count: int
     topic_count: int
     index_backend: str
+    compaction_clusters: int = 0
+    compaction_review_items: list[str] | None = None
 
 
-def reindex_data_dir(data_dir: Path) -> ReindexResult:
+def reindex_data_dir(
+    data_dir: Path,
+    *,
+    config: Mapping[str, Any] | None = None,
+    scan_clusters: bool = False,
+) -> ReindexResult:
     records = load_note_records(data_dir, validate=True)
     ensure_unique_note_ids(records)
     grouped = _group_by_topic(records)
@@ -63,11 +70,24 @@ def reindex_data_dir(data_dir: Path) -> ReindexResult:
     _write_json_if_changed(manifest_path, manifest_payload)
     artifacts.append(manifest_path)
 
+    compaction_clusters = 0
+    compaction_review_items: list[str] = []
+    if scan_clusters:
+        if config is None:
+            raise ValueError("config is required when scan_clusters=True")
+        from kb_librarian.compaction import scan_compaction_clusters
+
+        scan = scan_compaction_clusters(data_dir, config=config)
+        compaction_clusters = len(scan.clusters)
+        compaction_review_items = scan.review_item_ids
+
     return ReindexResult(
         artifacts=artifacts,
         note_count=len(records),
         topic_count=len(grouped),
         index_backend=backend,
+        compaction_clusters=compaction_clusters,
+        compaction_review_items=compaction_review_items,
     )
 
 

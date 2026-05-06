@@ -64,6 +64,22 @@ class IntegrationResult:
     rationale: str = ""
 
 
+@dataclass(frozen=True)
+class CompactionDisposition:
+    note_id: str
+    recommendation: str
+    rationale: str
+
+
+@dataclass(frozen=True)
+class CompactionDraft:
+    frontmatter: dict[str, Any]
+    body: str
+    source_note_ids: list[str]
+    dispositions: list[CompactionDisposition]
+    diff_summary: str
+
+
 class LLMProvider(Protocol):
     """Provider operations needed across Phase 1 milestones."""
 
@@ -104,6 +120,9 @@ class LLMProvider(Protocol):
 
     def synthesize_exploration(self, **kwargs: object) -> str:
         """Return broad ideation context."""
+
+    def synthesize_compaction(self, **kwargs: object) -> Mapping[str, Any]:
+        """Return a reviewable canonical note draft and disposition plan."""
 
 
 def operation_route(config: Mapping[str, Any], operation: str) -> OperationRoute:
@@ -384,6 +403,81 @@ class MockProvider:
         )
         return "\n".join(lines).strip()
 
+    def synthesize_compaction(self, **kwargs: object) -> Mapping[str, Any]:
+        source_notes = kwargs.get("source_notes")
+        if not isinstance(source_notes, list):
+            source_notes = []
+        clean_notes = [note for note in source_notes if isinstance(note, Mapping)]
+        first = clean_notes[0] if clean_notes else {}
+        first_fm = first.get("frontmatter", {}) if isinstance(first, Mapping) else {}
+        if not isinstance(first_fm, Mapping):
+            first_fm = {}
+
+        title = str(first_fm.get("title") or "Canonical compacted note").strip()
+        summary = str(first_fm.get("summary") or f"Compacted proposal for {title}.").strip()
+        topic = str(first_fm.get("topic") or "general").strip()
+        knowledge_type = str(first_fm.get("knowledge_type") or "technique").strip()
+        tags: list[str] = []
+        retrieval_phrases: list[str] = []
+        source_note_ids: list[str] = []
+        body_lines = ["## Core idea", ""]
+        for note in clean_notes:
+            note_id = str(note.get("note_id", "")).strip()
+            if not note_id:
+                continue
+            source_note_ids.append(note_id)
+            fm = note.get("frontmatter", {})
+            if isinstance(fm, Mapping):
+                note_summary = str(fm.get("summary", "")).strip()
+                note_title = str(fm.get("title", "")).strip()
+                if note_summary:
+                    body_lines.append(f"- [{note_id}] {note_summary}")
+                elif note_title:
+                    body_lines.append(f"- [{note_id}] {note_title}")
+                tags.extend(str(item) for item in fm.get("tags", []) if isinstance(item, str))
+                retrieval_phrases.extend(
+                    str(item) for item in fm.get("retrieval_phrases", []) if isinstance(item, str)
+                )
+
+        if not source_note_ids:
+            source_note_ids = ["unknown-note"]
+            body_lines.append("- No source notes were provided.")
+
+        body_lines.extend(
+            [
+                "",
+                "## Source Notes",
+                *[f"- {note_id}" for note_id in source_note_ids],
+                "",
+                "## Review Notes",
+                "- This mock proposal preserves the original notes until review acceptance.",
+            ]
+        )
+        return {
+            "frontmatter": {
+                "title": title,
+                "summary": summary,
+                "topic": topic,
+                "knowledge_type": knowledge_type,
+                "confidence": "medium",
+                "retrieval_phrases": retrieval_phrases[:8] or [title.lower()],
+                "tags": sorted(set(tags))[:8] or [normalize_topic_for_path(topic)],
+            },
+            "body": "\n".join(body_lines).strip() + "\n",
+            "source_note_ids": source_note_ids,
+            "dispositions": [
+                {
+                    "note_id": note_id,
+                    "recommendation": "supersede",
+                    "rationale": "content folded into the proposed canonical note",
+                }
+                for note_id in source_note_ids
+            ],
+            "diff_summary": (
+                f"Drafts one canonical note from {len(source_note_ids)} source notes and recommends supersession."
+            ),
+        }
+
 
 class AnthropicProvider:
     """Anthropic Messages API adapter using structured JSON prompts."""
@@ -515,6 +609,30 @@ class AnthropicProvider:
             f"Selected notes JSON:\n{json.dumps(selected_notes, sort_keys=True)}"
         )
         return self._messages_text(model=model, prompt=prompt).strip()
+
+    def synthesize_compaction(self, **kwargs: object) -> Mapping[str, Any]:
+        model = str(kwargs.get("model", "")).strip()
+        cluster_id = str(kwargs.get("cluster_id", "")).strip()
+        source_notes = kwargs.get("source_notes")
+        if not isinstance(source_notes, list):
+            source_notes = []
+        prompt = (
+            "Draft a review-gated KB compaction proposal. Return only JSON with keys:\n"
+            "frontmatter, body, source_note_ids, dispositions, diff_summary.\n\n"
+            "frontmatter must include title, summary, topic, knowledge_type, confidence, "
+            "retrieval_phrases, and tags. Do not include an id; the reviewer will assign one later. "
+            "body must be markdown for the proposed canonical note and cite source note IDs in square brackets. "
+            "dispositions must be a list of objects with note_id, recommendation, and rationale; "
+            "recommendation should be one of supersede, delete, keep, or review. "
+            "diff_summary must explain the user-visible change in plain language. "
+            "Do not apply changes to notes.\n\n"
+            f"Cluster ID: {cluster_id}\n"
+            f"Source notes JSON:\n{json.dumps(source_notes, sort_keys=True)}"
+        )
+        payload = self._messages_json(model=model, prompt=prompt)
+        if not isinstance(payload, Mapping):
+            raise ProviderError("Compaction response must be a JSON object.")
+        return payload
 
     def _messages_json(self, *, model: str, prompt: str) -> Any:
         envelope = self._messages_envelope(model=model, prompt=prompt)
@@ -648,6 +766,67 @@ def validate_integration_payload(payload: Any) -> IntegrationResult:
         verdict=verdict,
         target_note_ids=target_note_ids,
         rationale=rationale,
+    )
+
+
+def validate_compaction_payload(payload: Any) -> CompactionDraft:
+    if not isinstance(payload, Mapping):
+        raise ProviderError("Compaction response must be a JSON object.")
+    frontmatter = payload.get("frontmatter")
+    if not isinstance(frontmatter, Mapping):
+        raise ProviderError("Compaction response field frontmatter must be an object.")
+    compact_frontmatter: dict[str, Any] = {
+        "title": _required_string(frontmatter, "title"),
+        "summary": _required_string(frontmatter, "summary"),
+        "topic": _required_string(frontmatter, "topic"),
+        "knowledge_type": _required_enum(frontmatter, "knowledge_type", KNOWLEDGE_TYPES),
+        "confidence": _required_enum(frontmatter, "confidence", CONFIDENCE_LEVELS),
+        "retrieval_phrases": _required_string_list(frontmatter, "retrieval_phrases"),
+        "tags": _required_string_list(frontmatter, "tags"),
+    }
+    for optional_field in (
+        "basis",
+        "sources",
+        "agent_use",
+        "applies_when",
+        "does_not_apply_when",
+        "failure_modes",
+        "staleness_risk",
+    ):
+        if optional_field in frontmatter:
+            compact_frontmatter[optional_field] = frontmatter[optional_field]
+
+    body = _required_string(payload, "body")
+    source_note_ids = _required_string_list(payload, "source_note_ids")
+    raw_dispositions = payload.get("dispositions")
+    if not isinstance(raw_dispositions, list) or not raw_dispositions:
+        raise ProviderError("Compaction response field dispositions must be a non-empty list.")
+    dispositions: list[CompactionDisposition] = []
+    allowed_recommendations = {"supersede", "delete", "keep", "review"}
+    seen_note_ids: set[str] = set()
+    for index, item in enumerate(raw_dispositions):
+        if not isinstance(item, Mapping):
+            raise ProviderError(f"Compaction disposition {index} must be an object.")
+        note_id = _required_string(item, "note_id")
+        recommendation = _required_enum(item, "recommendation", allowed_recommendations)
+        rationale = _required_string(item, "rationale")
+        dispositions.append(
+            CompactionDisposition(note_id=note_id, recommendation=recommendation, rationale=rationale)
+        )
+        seen_note_ids.add(note_id)
+    missing = sorted(set(source_note_ids) - seen_note_ids)
+    if missing:
+        raise ProviderError(
+            "Compaction response dispositions must include every source note ID; missing: "
+            + ", ".join(missing)
+        )
+    diff_summary = _required_string(payload, "diff_summary")
+    return CompactionDraft(
+        frontmatter=compact_frontmatter,
+        body=body,
+        source_note_ids=source_note_ids,
+        dispositions=dispositions,
+        diff_summary=diff_summary,
     )
 
 
