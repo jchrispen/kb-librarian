@@ -1,71 +1,327 @@
-"""Review queue summaries for Phase 01d."""
+"""Durable review state and rendered queue summaries."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
-import hashlib
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Any, Iterable, Mapping
+
+from kb_librarian.errors import KBLibrarianError
 
 
+STATE_VERSION = 1
+PENDING_STATUSES = {"pending", "deferred"}
+RESOLVED_STATUSES = {"accepted", "rejected"}
+STATUSES = PENDING_STATUSES | RESOLVED_STATUSES
+PRIORITIES = {"high", "medium", "low"}
 ITEM_RE = re.compile(r"^##\s+item:\s+(.+?)\s*$", flags=re.MULTILINE)
 
 
 @dataclass(frozen=True)
-class ReviewItem:
+class QueueDefinition:
+    queue: str
+    count_key: str
+    id_prefix: str
+    file_name: str | None
+    file_title: str | None
+    priority: str
+    proposed_action: str
+    order: int
+
+
+QUEUE_DEFINITIONS: dict[str, QueueDefinition] = {
+    "dispute": QueueDefinition(
+        queue="dispute",
+        count_key="dispute",
+        id_prefix="dispute",
+        file_name="disputes.md",
+        file_title="Disputes",
+        priority="high",
+        proposed_action="review contradiction manually",
+        order=10,
+    ),
+    "merge": QueueDefinition(
+        queue="merge",
+        count_key="merge",
+        id_prefix="merge",
+        file_name="pending-merge.md",
+        file_title="Pending Merge",
+        priority="medium",
+        proposed_action="review and merge manually",
+        order=20,
+    ),
+    "classification": QueueDefinition(
+        queue="classification",
+        count_key="classification",
+        id_prefix="classification",
+        file_name="pending-classification.md",
+        file_title="Pending Classification",
+        priority="medium",
+        proposed_action="review classification manually",
+        order=30,
+    ),
+    "searchmiss": QueueDefinition(
+        queue="searchmiss",
+        count_key="searchmiss",
+        id_prefix="searchmiss",
+        file_name="search-misses.md",
+        file_title="Search Misses",
+        priority="medium",
+        proposed_action="review missed search result",
+        order=40,
+    ),
+    "duplicate": QueueDefinition(
+        queue="duplicate",
+        count_key="duplicate",
+        id_prefix="duplicate",
+        file_name=None,
+        file_title=None,
+        priority="low",
+        proposed_action="inspect duplicate source",
+        order=50,
+    ),
+    "unsupported_file": QueueDefinition(
+        queue="unsupported_file",
+        count_key="unsupported_file",
+        id_prefix="unsupported",
+        file_name=None,
+        file_title=None,
+        priority="low",
+        proposed_action="convert or remove unsupported raw file",
+        order=60,
+    ),
+}
+
+
+@dataclass(frozen=True)
+class ReviewSummaryItem:
     kind: str
     item_id: str
     summary: str
+
+
+class ReviewStateError(KBLibrarianError):
+    """Raised when durable review state is malformed."""
+
+
+def review_state_path(data_dir: Path) -> Path:
+    return data_dir / "review" / "review-items.json"
+
+
+def ensure_review_state(data_dir: Path, *, render: bool = True) -> dict[str, Any]:
+    """Load durable review state, bootstrapping it from Phase 1 surfaces if missing."""
+
+    path = review_state_path(data_dir)
+    if path.exists():
+        state = _load_state(path)
+    else:
+        state = {"version": STATE_VERSION, "items": []}
+        for imported in _legacy_markdown_items(data_dir):
+            _append_item(
+                state,
+                queue=str(imported["queue"]),
+                title=str(imported["title"]),
+                target_notes=list(imported["target_notes"]),
+                proposed_action=str(imported["proposed_action"]),
+                payload=dict(imported["payload"]),
+                priority=str(imported["priority"]),
+                created=str(imported["created"]),
+                history=list(imported["history"]),
+                fingerprint=str(imported["fingerprint"]),
+            )
+        for imported in _duplicate_items_from_ingest_log(data_dir):
+            _append_item(state, **imported)
+        for imported in _unsupported_items_from_error_log(data_dir):
+            _append_item(state, **imported)
+        _write_state(path, state)
+
+    if render:
+        render_review_queues(data_dir, state=state)
+    return state
+
+
+def add_review_item(
+    data_dir: Path,
+    *,
+    queue: str,
+    title: str,
+    target_notes: list[str] | None,
+    proposed_action: str | None,
+    payload: Mapping[str, Any],
+    priority: str | None = None,
+    created: str | None = None,
+    fingerprint: str | None = None,
+) -> str | None:
+    """Append a pending review item unless an equivalent item already exists."""
+
+    state = ensure_review_state(data_dir, render=False)
+    definition = _definition(queue)
+    payload_dict = dict(payload)
+    item_fingerprint = fingerprint or _payload_fingerprint(
+        queue=queue,
+        title=title,
+        target_notes=target_notes or [],
+        proposed_action=proposed_action or definition.proposed_action,
+        payload=payload_dict,
+    )
+    if _find_existing_item(state, item_fingerprint) is not None:
+        return None
+
+    item_id = _append_item(
+        state,
+        queue=queue,
+        title=title,
+        target_notes=target_notes or [],
+        proposed_action=proposed_action or definition.proposed_action,
+        payload={**payload_dict, "fingerprint": item_fingerprint},
+        priority=priority or definition.priority,
+        created=created or date.today().isoformat(),
+        history=[
+            {
+                "at": datetime.now().isoformat(timespec="seconds"),
+                "action": "created",
+                "source": "api",
+            }
+        ],
+        fingerprint=item_fingerprint,
+    )
+    _write_state(review_state_path(data_dir), state)
+    render_review_queues(data_dir, state=state)
+    return item_id
+
+
+def queue_duplicate_review_item(
+    data_dir: Path,
+    *,
+    source_name: str,
+    source_path: Path,
+    source_hash: str,
+    archived_path: Path | None,
+) -> str | None:
+    payload: dict[str, Any] = {
+        "source_name": source_name,
+        "source_path": source_path.as_posix(),
+        "source_hash": source_hash,
+    }
+    if archived_path is not None:
+        payload["archived_path"] = archived_path.as_posix()
+    return add_review_item(
+        data_dir,
+        queue="duplicate",
+        title=source_name,
+        target_notes=[],
+        proposed_action=QUEUE_DEFINITIONS["duplicate"].proposed_action,
+        payload=payload,
+        priority="low",
+        fingerprint=_payload_fingerprint(
+            queue="duplicate",
+            title=source_name,
+            target_notes=[],
+            proposed_action=QUEUE_DEFINITIONS["duplicate"].proposed_action,
+            payload=payload,
+        ),
+    )
+
+
+def queue_unsupported_file_review_item(data_dir: Path, *, source_path: Path) -> str | None:
+    payload = {"source_path": source_path.as_posix()}
+    return add_review_item(
+        data_dir,
+        queue="unsupported_file",
+        title=source_path.name,
+        target_notes=[],
+        proposed_action=QUEUE_DEFINITIONS["unsupported_file"].proposed_action,
+        payload=payload,
+        priority="low",
+        fingerprint=_payload_fingerprint(
+            queue="unsupported_file",
+            title=source_path.name,
+            target_notes=[],
+            proposed_action=QUEUE_DEFINITIONS["unsupported_file"].proposed_action,
+            payload=payload,
+        ),
+    )
+
+
+def validate_review_item(item: Mapping[str, Any]) -> None:
+    required = {
+        "id",
+        "queue",
+        "status",
+        "priority",
+        "title",
+        "created",
+        "updated",
+        "target_notes",
+        "proposed_action",
+        "payload",
+        "history",
+    }
+    missing = sorted(required - set(item))
+    if missing:
+        raise ReviewStateError(f"Review item is missing required fields: {', '.join(missing)}")
+    queue = item.get("queue")
+    if not isinstance(queue, str) or queue not in QUEUE_DEFINITIONS:
+        raise ReviewStateError(f"Review item has unsupported queue: {queue!r}")
+    status = item.get("status")
+    if not isinstance(status, str) or status not in STATUSES:
+        raise ReviewStateError(f"Review item has unsupported status: {status!r}")
+    priority = item.get("priority")
+    if not isinstance(priority, str) or priority not in PRIORITIES:
+        raise ReviewStateError(f"Review item has unsupported priority: {priority!r}")
+    if not isinstance(item.get("target_notes"), list):
+        raise ReviewStateError("Review item target_notes must be a list.")
+    if not isinstance(item.get("payload"), dict):
+        raise ReviewStateError("Review item payload must be an object.")
+    if not isinstance(item.get("history"), list):
+        raise ReviewStateError("Review item history must be a list.")
+    for key in ("id", "title", "created", "updated", "proposed_action"):
+        if not isinstance(item.get(key), str):
+            raise ReviewStateError(f"Review item {key} must be a string.")
+
+
+def render_review_queues(data_dir: Path, *, state: Mapping[str, Any] | None = None) -> None:
+    state = state or ensure_review_state(data_dir, render=False)
+    items = _state_items(state)
+    for definition in QUEUE_DEFINITIONS.values():
+        if definition.file_name is None:
+            continue
+        queue_items = [
+            item
+            for item in items
+            if item["queue"] == definition.queue and str(item["status"]) in PENDING_STATUSES
+        ]
+        text = _render_queue_file(definition, sorted(queue_items, key=_queue_file_sort_key))
+        path = data_dir / "review" / definition.file_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
 
 
 def collect_review_summary(
     data_dir: Path,
     *,
     max_items: int,
-) -> tuple[dict[str, int], list[ReviewItem]]:
-    classification = _parse_markdown_items(
-        data_dir / "review" / "pending-classification.md",
-        kind="classification",
-        summary_patterns=(r"^-\s+title:\s+(.+)$", r"^Reason:\s+(.+)$"),
-    )
-    merge = _parse_markdown_items(
-        data_dir / "review" / "pending-merge.md",
-        kind="merge",
-        summary_patterns=(r"^-\s+candidate_title:\s+(.+)$", r"^Rationale:\s+(.+)$"),
-    )
-    disputes = _parse_markdown_items(
-        data_dir / "review" / "disputes.md",
-        kind="dispute",
-        summary_patterns=(r"^-\s+candidate_title:\s+(.+)$", r"^Rationale:\s+(.+)$"),
-    )
-    duplicates = _load_duplicate_items(data_dir)
-    unsupported = _load_unsupported_items(data_dir)
+) -> tuple[dict[str, int], list[ReviewSummaryItem]]:
+    state = ensure_review_state(data_dir, render=True)
+    pending = [item for item in _state_items(state) if str(item["status"]) in PENDING_STATUSES]
+    counts = {definition.count_key: 0 for definition in QUEUE_DEFINITIONS.values()}
+    for item in pending:
+        definition = _definition(str(item["queue"]))
+        counts[definition.count_key] += 1
 
-    counts = {
-        "classification": len(classification),
-        "merge": len(merge),
-        "dispute": len(disputes),
-        "duplicate": len(duplicates),
-        "unsupported_file": len(unsupported),
-    }
-
-    ordered = [
-        *disputes,
-        *merge,
-        *classification,
-        *duplicates,
-        *unsupported,
-    ]
+    ordered = sorted(pending, key=_summary_sort_key)
     if max_items > 0:
         ordered = ordered[:max_items]
-    return counts, ordered
+    return counts, [_summary_item(item) for item in ordered]
 
 
 def render_review_summary(
     counts: Mapping[str, int],
-    items: Iterable[ReviewItem],
+    items: Iterable[ReviewSummaryItem],
     *,
     max_items: int,
 ) -> str:
@@ -76,6 +332,7 @@ def render_review_summary(
         f"classification: {counts.get('classification', 0)}",
         f"merge: {counts.get('merge', 0)}",
         f"dispute: {counts.get('dispute', 0)}",
+        f"searchmiss: {counts.get('searchmiss', 0)}",
         f"duplicate: {counts.get('duplicate', 0)}",
         f"unsupported_file: {counts.get('unsupported_file', 0)}",
     ]
@@ -88,26 +345,441 @@ def render_review_summary(
     return "\n".join(lines) + "\n"
 
 
-def _parse_markdown_items(path: Path, *, kind: str, summary_patterns: tuple[str, ...]) -> list[ReviewItem]:
+def _definition(queue: str) -> QueueDefinition:
+    try:
+        return QUEUE_DEFINITIONS[queue]
+    except KeyError as exc:
+        raise ReviewStateError(f"Unsupported review queue: {queue!r}") from exc
+
+
+def _load_state(path: Path) -> dict[str, Any]:
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ReviewStateError(f"Malformed review state at {path}: {exc}") from exc
+    if not isinstance(loaded, dict):
+        raise ReviewStateError(f"Review state at {path} must be an object.")
+    if loaded.get("version") != STATE_VERSION:
+        raise ReviewStateError(f"Review state at {path} has unsupported version {loaded.get('version')!r}.")
+    _state_items(loaded)
+    return loaded
+
+
+def _state_items(state: Mapping[str, Any]) -> list[dict[str, Any]]:
+    items = state.get("items")
+    if not isinstance(items, list):
+        raise ReviewStateError("Review state items must be a list.")
+    validated: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ReviewStateError("Review state items must contain only objects.")
+        validate_review_item(item)
+        validated.append(item)
+    return validated
+
+
+def _write_state(path: Path, state: Mapping[str, Any]) -> None:
+    _state_items(state)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _append_item(
+    state: dict[str, Any],
+    *,
+    queue: str,
+    title: str,
+    target_notes: list[str],
+    proposed_action: str,
+    payload: dict[str, Any],
+    priority: str,
+    created: str,
+    history: list[dict[str, Any]],
+    fingerprint: str,
+) -> str:
+    if _find_existing_item(state, fingerprint) is not None:
+        existing = _find_existing_item(state, fingerprint)
+        return str(existing["id"]) if existing else ""
+    definition = _definition(queue)
+    created_date = _date_part(created)
+    item_id = _allocate_id(state, prefix=definition.id_prefix, created_date=created_date)
+    item = {
+        "id": item_id,
+        "queue": queue,
+        "status": "pending",
+        "priority": priority,
+        "title": title.strip() or "(untitled review item)",
+        "created": created_date,
+        "updated": created_date,
+        "target_notes": sorted({str(note_id) for note_id in target_notes if str(note_id).strip()}),
+        "proposed_action": proposed_action,
+        "payload": {**payload, "fingerprint": fingerprint},
+        "history": history,
+    }
+    validate_review_item(item)
+    state.setdefault("items", []).append(item)
+    return item_id
+
+
+def _find_existing_item(state: Mapping[str, Any], fingerprint: str) -> dict[str, Any] | None:
+    for item in _state_items(state):
+        payload = item.get("payload", {})
+        if isinstance(payload, dict) and payload.get("fingerprint") == fingerprint:
+            return item
+    return None
+
+
+def _allocate_id(state: Mapping[str, Any], *, prefix: str, created_date: str) -> str:
+    pattern = re.compile(rf"^{re.escape(prefix)}-{re.escape(created_date)}-(\d{{3}})$")
+    used: set[int] = set()
+    for item in _state_items(state):
+        match = pattern.match(str(item.get("id", "")))
+        if match:
+            used.add(int(match.group(1)))
+    counter = 1
+    while counter in used:
+        counter += 1
+    return f"{prefix}-{created_date}-{counter:03d}"
+
+
+def _payload_fingerprint(
+    *,
+    queue: str,
+    title: str,
+    target_notes: list[str],
+    proposed_action: str,
+    payload: Mapping[str, Any],
+) -> str:
+    material = {
+        "queue": queue,
+        "title": title.strip(),
+        "target_notes": sorted(set(target_notes)),
+        "proposed_action": proposed_action,
+        "payload": payload,
+    }
+    return hashlib.sha256(json.dumps(material, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+
+
+def _legacy_markdown_items(data_dir: Path) -> list[dict[str, Any]]:
+    imports: list[dict[str, Any]] = []
+    sources = (
+        ("classification", data_dir / "review" / "pending-classification.md"),
+        ("merge", data_dir / "review" / "pending-merge.md"),
+        ("dispute", data_dir / "review" / "disputes.md"),
+    )
+    for queue, path in sources:
+        imports.extend(_legacy_items_from_file(queue, path, data_dir=data_dir))
+    return imports
+
+
+def _legacy_items_from_file(queue: str, path: Path, *, data_dir: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     text = path.read_text(encoding="utf-8")
-
     matches = list(ITEM_RE.finditer(text))
     if not matches:
         return []
 
-    items: list[ReviewItem] = []
+    definition = _definition(queue)
+    imported: list[dict[str, Any]] = []
     for index, match in enumerate(matches):
         start = match.end()
         end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        block = text[start:end]
-        item_id = match.group(1).strip()
-        summary = _summary_from_block(block, summary_patterns)
-        items.append(ReviewItem(kind=kind, item_id=item_id, summary=summary))
+        block = text[start:end].strip()
+        source_item_id = match.group(1).strip()
+        fields = _fields_from_legacy_block(block)
+        title = _legacy_title(queue, fields, block)
+        created = _legacy_created(source_item_id, path)
+        target_notes = _target_notes_from_fields(fields)
+        fingerprint = fields.get("fingerprint") or _payload_fingerprint(
+            queue=queue,
+            title=title,
+            target_notes=target_notes,
+            proposed_action=definition.proposed_action,
+            payload={"source_markdown": block, "source_item_id": source_item_id},
+        )
+        payload = {
+            **fields,
+            "source_item_id": source_item_id,
+            "source_markdown": block,
+        }
+        imported.append(
+            {
+                "queue": queue,
+                "title": title,
+                "target_notes": target_notes,
+                "proposed_action": definition.proposed_action,
+                "payload": payload,
+                "priority": definition.priority,
+                "created": created,
+                "history": [
+                    {
+                        "at": datetime.now().isoformat(timespec="seconds"),
+                        "action": "imported",
+                        "source": _relative_path(data_dir, path),
+                        "source_item_id": source_item_id,
+                    }
+                ],
+                "fingerprint": fingerprint,
+            }
+        )
+    return imported
 
-    items.reverse()
-    return items
+
+def _fields_from_legacy_block(block: str) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    for label, key in (
+        ("Source", "source"),
+        ("Source hash", "source_hash"),
+        ("Target note IDs", "target_note_ids"),
+        ("Rationale", "rationale"),
+        ("Reason", "reason"),
+        ("Suggested action", "suggested_action"),
+    ):
+        value = _line_field(block, label)
+        if value:
+            fields[key] = value
+    for key in ("fingerprint", "candidate_title", "title", "summary", "suggested_topic", "suggested_type", "confidence"):
+        value = _bullet_field(block, key)
+        if value:
+            fields[key] = value
+    body = _code_block_after(block, "- candidate_body:")
+    if body:
+        fields["candidate_body"] = body
+    return fields
+
+
+def _line_field(block: str, label: str) -> str | None:
+    pattern = re.compile(rf"^{re.escape(label)}:\s*(.+?)\s*$", flags=re.MULTILINE)
+    match = pattern.search(block)
+    if not match:
+        return None
+    return _strip_markdown_value(match.group(1))
+
+
+def _bullet_field(block: str, key: str) -> str | None:
+    pattern = re.compile(rf"^-\s+{re.escape(key)}:\s*(.+?)\s*$", flags=re.MULTILINE)
+    match = pattern.search(block)
+    if not match:
+        return None
+    return _strip_markdown_value(match.group(1))
+
+
+def _strip_markdown_value(value: str) -> str:
+    stripped = value.strip()
+    if stripped.startswith("`") and stripped.endswith("`") and len(stripped) >= 2:
+        return stripped[1:-1]
+    return stripped
+
+
+def _code_block_after(block: str, marker: str) -> str | None:
+    index = block.find(marker)
+    if index < 0:
+        return None
+    remainder = block[index + len(marker) :]
+    match = re.search(r"```(?:\w+)?\n(.*?)\n```", remainder, flags=re.DOTALL)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _legacy_title(queue: str, fields: Mapping[str, Any], block: str) -> str:
+    for key in ("candidate_title", "title", "reason", "rationale"):
+        value = str(fields.get(key, "")).strip()
+        if value:
+            return value
+    return _summary_from_block(block, (r"^-\s+title:\s+(.+)$", r"^-\s+candidate_title:\s+(.+)$", r"^Reason:\s+(.+)$")) or queue
+
+
+def _target_notes_from_fields(fields: Mapping[str, Any]) -> list[str]:
+    value = fields.get("target_note_ids")
+    if not isinstance(value, str) or not value.strip():
+        return []
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def _legacy_created(source_item_id: str, path: Path) -> str:
+    date_match = re.search(r"(20\d{2})-?(\d{2})-?(\d{2})", source_item_id)
+    if date_match:
+        return f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime).date().isoformat()
+    except OSError:
+        return date.today().isoformat()
+
+
+def _duplicate_items_from_ingest_log(data_dir: Path) -> list[dict[str, Any]]:
+    path = data_dir / ".kb" / "ingested.json"
+    if not path.exists():
+        return []
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(loaded, list):
+        return []
+
+    imported: list[dict[str, Any]] = []
+    definition = QUEUE_DEFINITIONS["duplicate"]
+    for entry in loaded:
+        if not isinstance(entry, dict) or entry.get("status") != "duplicate":
+            continue
+        source_name = str(entry.get("source_name") or entry.get("source_path") or "duplicate source")
+        processed_at = str(entry.get("processed_at") or date.today().isoformat())
+        payload = dict(entry)
+        fingerprint = _payload_fingerprint(
+            queue="duplicate",
+            title=source_name,
+            target_notes=[],
+            proposed_action=definition.proposed_action,
+            payload=payload,
+        )
+        imported.append(
+            {
+                "queue": "duplicate",
+                "title": source_name,
+                "target_notes": [],
+                "proposed_action": definition.proposed_action,
+                "payload": payload,
+                "priority": definition.priority,
+                "created": _date_part(processed_at),
+                "history": [{"at": processed_at, "action": "imported", "source": ".kb/ingested.json"}],
+                "fingerprint": fingerprint,
+            }
+        )
+    return imported
+
+
+def _unsupported_items_from_error_log(data_dir: Path) -> list[dict[str, Any]]:
+    path = data_dir / ".kb" / "errors.log"
+    if not path.exists():
+        return []
+    imported: list[dict[str, Any]] = []
+    definition = QUEUE_DEFINITIONS["unsupported_file"]
+    marker = "Unsupported ingest file extension for "
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if marker not in line:
+            continue
+        stamp, _, remainder = line.partition(" ")
+        source = remainder.split(marker, maxsplit=1)[-1].strip()
+        payload = {"source_path": source, "log_line": line}
+        fingerprint = _payload_fingerprint(
+            queue="unsupported_file",
+            title=Path(source).name or source,
+            target_notes=[],
+            proposed_action=definition.proposed_action,
+            payload=payload,
+        )
+        imported.append(
+            {
+                "queue": "unsupported_file",
+                "title": Path(source).name or source,
+                "target_notes": [],
+                "proposed_action": definition.proposed_action,
+                "payload": payload,
+                "priority": definition.priority,
+                "created": _date_part(stamp),
+                "history": [{"at": stamp, "action": "imported", "source": ".kb/errors.log"}],
+                "fingerprint": fingerprint,
+            }
+        )
+    return imported
+
+
+def _render_queue_file(definition: QueueDefinition, items: list[dict[str, Any]]) -> str:
+    lines = [
+        f"# {definition.file_title}",
+        "",
+        "<!-- Generated from review/review-items.json. Do not edit this file as the source of truth. -->",
+        "",
+    ]
+    for item in items:
+        lines.extend(_render_item_markdown(item))
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_item_markdown(item: Mapping[str, Any]) -> list[str]:
+    queue = str(item["queue"])
+    payload = item["payload"] if isinstance(item["payload"], dict) else {}
+    lines = [
+        f"## item: {item['id']}",
+        "",
+    ]
+    source = payload.get("source") or payload.get("source_path")
+    if source:
+        lines.append(f"Source: `{source}`")
+    source_hash = payload.get("source_hash")
+    if source_hash:
+        lines.append(f"Source hash: `{source_hash}`")
+    if item.get("target_notes"):
+        lines.append(f"Target note IDs: {', '.join(str(note_id) for note_id in item['target_notes'])}")
+    rationale = payload.get("rationale")
+    reason = payload.get("reason")
+    if rationale:
+        lines.append(f"Rationale: {rationale}")
+    if reason:
+        lines.append(f"Reason: {reason}")
+    lines.append(f"Suggested action: {item['proposed_action']}.")
+
+    if queue == "classification":
+        _extend_if_present(lines, "- title", payload.get("title") or item.get("title"))
+        _extend_if_present(lines, "- summary", payload.get("summary"))
+        _extend_if_present(lines, "- suggested_topic", payload.get("suggested_topic"))
+        _extend_if_present(lines, "- suggested_type", payload.get("suggested_type"))
+        _extend_if_present(lines, "- confidence", payload.get("confidence"))
+    elif queue in {"merge", "dispute"}:
+        _extend_if_present(lines, "- fingerprint", payload.get("fingerprint"))
+        _extend_if_present(lines, "- candidate_title", payload.get("candidate_title") or item.get("title"))
+        body = payload.get("candidate_body")
+        if isinstance(body, str) and body.strip():
+            lines.extend(["- candidate_body:", "```markdown", body.rstrip("\n"), "```"])
+    elif queue == "searchmiss":
+        _extend_if_present(lines, "- query", payload.get("query") or item.get("title"))
+        _extend_if_present(lines, "- misses", payload.get("misses"))
+
+    lines.extend(["", ""])
+    return lines
+
+
+def _extend_if_present(lines: list[str], label: str, value: Any) -> None:
+    if value is not None and str(value).strip():
+        lines.append(f"{label}: {value}")
+
+
+def _summary_item(item: Mapping[str, Any]) -> ReviewSummaryItem:
+    queue = str(item["queue"])
+    definition = _definition(queue)
+    return ReviewSummaryItem(kind=definition.count_key, item_id=str(item["id"]), summary=_item_summary(item))
+
+
+def _item_summary(item: Mapping[str, Any]) -> str:
+    payload = item.get("payload", {})
+    if isinstance(payload, dict):
+        for key in ("candidate_title", "title", "source_name", "source_path", "query", "reason", "rationale"):
+            value = str(payload.get(key, "")).strip()
+            if value:
+                return value
+    return str(item.get("title", "")).strip() or "(no summary)"
+
+
+def _summary_sort_key(item: Mapping[str, Any]) -> tuple[int, int, str, str]:
+    priority_rank = {"high": 0, "medium": 1, "low": 2}.get(str(item.get("priority")), 9)
+    queue_order = _definition(str(item["queue"])).order
+    return (priority_rank, queue_order, str(item["created"]), str(item["id"]))
+
+
+def _queue_file_sort_key(item: Mapping[str, Any]) -> tuple[str, str]:
+    return (str(item["created"]), str(item["id"]))
+
+
+def _date_part(value: str) -> str:
+    match = re.search(r"(20\d{2})-(\d{2})-(\d{2})", value)
+    if match:
+        return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+    compact = re.search(r"(20\d{2})(\d{2})(\d{2})", value)
+    if compact:
+        return f"{compact.group(1)}-{compact.group(2)}-{compact.group(3)}"
+    return date.today().isoformat()
 
 
 def _summary_from_block(block: str, patterns: tuple[str, ...]) -> str:
@@ -126,44 +798,8 @@ def _summary_from_block(block: str, patterns: tuple[str, ...]) -> str:
     return "(no summary)"
 
 
-def _load_duplicate_items(data_dir: Path) -> list[ReviewItem]:
-    path = data_dir / ".kb" / "ingested.json"
-    if not path.exists():
-        return []
+def _relative_path(data_dir: Path, path: Path) -> str:
     try:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(loaded, list):
-        return []
-
-    items: list[ReviewItem] = []
-    for entry in loaded:
-        if not isinstance(entry, dict) or entry.get("status") != "duplicate":
-            continue
-        source_name = str(entry.get("source_name", "unknown"))
-        stamp = str(entry.get("processed_at", "unknown")).replace(":", "").replace("-", "")
-        digest = str(entry.get("hash", ""))[:8]
-        item_id = f"duplicate-{stamp}-{digest}".strip("-")
-        items.append(ReviewItem(kind="duplicate", item_id=item_id, summary=source_name))
-
-    items.reverse()
-    return items
-
-
-def _load_unsupported_items(data_dir: Path) -> list[ReviewItem]:
-    path = data_dir / ".kb" / "errors.log"
-    if not path.exists():
-        return []
-    items: list[ReviewItem] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        marker = "Unsupported ingest file extension for "
-        if marker not in line:
-            continue
-        source = line.split(marker, maxsplit=1)[-1].strip()
-        digest = hashlib.sha256(line.encode("utf-8")).hexdigest()[:8]
-        item_id = f"unsupported-{digest}"
-        items.append(ReviewItem(kind="unsupported_file", item_id=item_id, summary=source))
-
-    items.reverse()
-    return items
+        return path.relative_to(data_dir).as_posix()
+    except ValueError:
+        return path.as_posix()

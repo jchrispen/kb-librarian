@@ -7,7 +7,16 @@ from pathlib import Path
 from typing import Any
 
 from kb_librarian.config import default_config, read_config_file, validate_config, write_config_file
-from kb_librarian.paths import DIRECTORIES, LOG_FILES, REVIEW_QUEUE_FILES, ROOT_FILES, STATE_FILES, config_path
+from kb_librarian.paths import (
+    DIRECTORIES,
+    LOG_FILES,
+    REVIEW_QUEUE_FILES,
+    REVIEW_STATE_FILE,
+    ROOT_FILES,
+    STATE_FILES,
+    config_path,
+)
+from kb_librarian.review import ensure_review_state
 
 ROOT_FILE_CONTENT = {
     "INDEX.md": "# KB Index\n\nThis index is managed by KB Librarian.\n",
@@ -21,6 +30,7 @@ REVIEW_FILE_CONTENT = {
     "review/pending-classification.md": "# Pending Classification\n\n",
     "review/pending-merge.md": "# Pending Merge\n\n",
     "review/disputes.md": "# Disputes\n\n",
+    "review/search-misses.md": "# Search Misses\n\n",
 }
 
 
@@ -48,6 +58,11 @@ def initialize_data_dir(data_dir: str | Path, *, hooks: bool = False) -> list[Pa
         path = root / filename
         if _write_text_if_missing(path, REVIEW_FILE_CONTENT[filename]):
             created.append(path)
+
+    review_state = root / REVIEW_STATE_FILE
+    if not review_state.exists():
+        ensure_review_state(root, render=False)
+        created.append(review_state)
 
     config_file = config_path(root)
     if not config_file.exists():

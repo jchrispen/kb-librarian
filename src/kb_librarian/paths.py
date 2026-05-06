@@ -22,7 +22,10 @@ REVIEW_QUEUE_FILES = (
     "review/pending-classification.md",
     "review/pending-merge.md",
     "review/disputes.md",
+    "review/search-misses.md",
 )
+
+REVIEW_STATE_FILE = "review/review-items.json"
 
 STATE_FILES = {
     ".kb/ingested.json": [],

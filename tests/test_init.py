@@ -6,7 +6,7 @@ import yaml
 
 from kb_librarian.config import default_config, write_config_file
 from kb_librarian.init import initialize_data_dir
-from kb_librarian.paths import DIRECTORIES, LOG_FILES, REVIEW_QUEUE_FILES, ROOT_FILES, STATE_FILES
+from kb_librarian.paths import DIRECTORIES, LOG_FILES, REVIEW_QUEUE_FILES, REVIEW_STATE_FILE, ROOT_FILES, STATE_FILES
 
 
 def test_initialize_data_dir_creates_phase_1_layout(tmp_path):
@@ -19,6 +19,7 @@ def test_initialize_data_dir_creates_phase_1_layout(tmp_path):
         assert (tmp_path / filename).is_file()
     for filename in REVIEW_QUEUE_FILES:
         assert (tmp_path / filename).is_file()
+    assert (tmp_path / REVIEW_STATE_FILE).is_file()
     for filename in STATE_FILES:
         assert (tmp_path / filename).is_file()
     for filename in LOG_FILES:

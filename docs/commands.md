@@ -60,13 +60,22 @@ Current shipped supported input formats:
 
 ## `kb review`
 
-Show bounded review counts and queue excerpts.
+Show bounded review counts and queue excerpts backed by durable review state.
 
 ```bash
 kb review [list] [--data-dir <path>]
 ```
 
-Current shipped behavior is summary output only.
+`kb review` and `kb review list` are equivalent. They read pending items from `review/review-items.json`, create that file by importing Phase 1 markdown queues when needed, and rerender markdown views under `review/`.
+
+Rendered review views include:
+
+- `review/pending-classification.md`
+- `review/pending-merge.md`
+- `review/disputes.md`
+- `review/search-misses.md`
+
+Current shipped behavior is summary output only; accepting, rejecting, deferring, and explaining review items are still planned commands.
 
 ## `kb context`
 

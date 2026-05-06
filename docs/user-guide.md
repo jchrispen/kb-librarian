@@ -91,6 +91,7 @@ Ingest may:
 - queue classification review items
 - queue merge proposals
 - mark disputes
+- record duplicate and unsupported-file review items
 - archive processed raw files
 
 ## Rebuild Indexes
@@ -165,13 +166,16 @@ Use `kb review` to inspect bounded review queues.
 kb review --data-dir /path/to/kb
 ```
 
-This summarizes current review work from:
+Review items are stored in `review/review-items.json` with stable IDs, status, payload, and history. The markdown files under `review/` are generated inspection surfaces:
 
 - `review/pending-classification.md`
 - `review/pending-merge.md`
 - `review/disputes.md`
+- `review/search-misses.md`
 
-Current shipped review behavior is read-only summary output. Actionable review commands are planned but not part of the current CLI.
+`kb review` and `kb review list` read from `review/review-items.json`, hide resolved items from default output, and bound the number of listed items using `review.max_review_items_per_run`. If a Phase 1 KB only has markdown queues, the first review run imports those entries into durable state and rerenders the queue files.
+
+Current shipped review behavior is still read-only summary output. Actionable review commands are planned but not part of the current CLI.
 
 ## Recommended Early Workflow
 
@@ -181,4 +185,4 @@ Current shipped review behavior is read-only summary output. Actionable review c
 4. Run `kb reindex` when you make manual changes.
 5. Use `kb search` for exact concepts.
 6. Use `kb context` before architecture or coding work.
-7. Check `kb review` periodically for classification, merge, and dispute items.
+7. Check `kb review` periodically for classification, merge, dispute, duplicate, and unsupported-file items.

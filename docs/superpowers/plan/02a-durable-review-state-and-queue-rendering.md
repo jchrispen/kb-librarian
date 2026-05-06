@@ -2,6 +2,9 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
+Status: Complete
+Completed: 2026-05-06
+
 ## Goal
 
 Replace Phase 1's markdown-only review state with a durable machine-readable review database while keeping markdown review files as generated inspection surfaces. At the end of this milestone, review items have stable IDs, survive rerenders, and can be listed consistently without manual parsing of queue markdown.
@@ -83,6 +86,23 @@ Replace Phase 1's markdown-only review state with a durable machine-readable rev
 - Existing Phase 1 review entries are imported without duplication.
 - Queue markdown is rendered from durable state and remains human-inspectable.
 - `kb review` and `kb review list` show stable IDs and bounded pending output.
+
+## Completion Record
+
+Implemented files:
+
+- `src/kb_librarian/review.py`
+- `src/kb_librarian/ingest.py`
+- `src/kb_librarian/init.py`
+- `src/kb_librarian/paths.py`
+- `tests/test_review.py`
+- `tests/test_cli.py`
+- `tests/test_init.py`
+
+Verification:
+
+- `python3 -m pytest tests/test_review.py tests/test_cli.py::test_kb_review_lists_bounded_items tests/test_ingest.py::test_ingest_ambiguous_candidate_goes_to_pending_classification tests/test_ingest.py::test_ingest_adds_nuance_queues_merge_idempotently tests/test_ingest.py::test_ingest_contradicts_marks_note_disputed_and_writes_review tests/test_init.py` - passed, 10 tests.
+- `python3 -m pytest` - passed, 52 tests.
 
 ## Out of Scope
 

@@ -43,13 +43,24 @@ Check:
 
 ## Review items are piling up
 
-In the current shipped CLI, `kb review` is summary-only. You can inspect these files directly:
+In the current shipped CLI, `kb review` is summary-only. Use it to see bounded counts and stable item IDs:
+
+```bash
+kb review --data-dir <path>
+```
+
+The durable review source of truth is:
+
+- `review/review-items.json`
+
+You can inspect these generated markdown views directly:
 
 - `review/pending-classification.md`
 - `review/pending-merge.md`
 - `review/disputes.md`
+- `review/search-misses.md`
 
-Actionable review commands are planned, but not currently shipped.
+If `review/review-items.json` is missing in an older KB, `kb review` imports existing Phase 1 queue entries and rerenders the markdown views. Actionable review commands are planned, but not currently shipped.
 
 ## I edited note files manually and results look stale
 

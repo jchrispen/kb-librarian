@@ -6,7 +6,7 @@ It stores durable knowledge as markdown files in a separate data directory, buil
 
 ## Status
 
-This repository currently ships the Phase 1 core workflow:
+This repository currently ships the Phase 1 core workflow plus the Phase 2 durable review-state increment:
 
 - `kb init`
 - `kb add`
@@ -92,7 +92,15 @@ A KB data directory contains:
 - `review/`
 - `.kb/`
 
-The markdown notes are the durable artifact. Generated indexes and local state under `.kb/` can be rebuilt.
+The markdown notes are the durable knowledge artifact. Review items are durable state in `review/review-items.json`; the markdown queue files in `review/` are generated inspection surfaces. Generated indexes and local state under `.kb/` can be rebuilt.
+
+Important review files:
+
+- `review/review-items.json`: source of truth for review item IDs, status, payload, and history
+- `review/pending-classification.md`: generated view for classification review
+- `review/pending-merge.md`: generated view for merge proposals
+- `review/disputes.md`: generated view for contradictions
+- `review/search-misses.md`: generated view reserved for later search-miss promotion
 
 ## Core Commands
 
@@ -102,7 +110,7 @@ The markdown notes are the durable artifact. Generated indexes and local state u
 - `kb reindex`: rebuild markdown indexes, backlinks, manifest, stats, and lexical index
 - `kb search`: search notes by title, summary, tags, retrieval phrases, and body text
 - `kb get`: inspect one note by ID
-- `kb review`: inspect bounded review queues
+- `kb review`: inspect bounded review queues backed by `review/review-items.json`
 - `kb context`: retrieve compact cited context for a task
 
 ## Provider Notes

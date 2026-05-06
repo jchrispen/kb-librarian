@@ -12,17 +12,17 @@ Phase 2 assumes Phase 1 is complete and should preserve all existing note files,
 
 | Milestone | Status | Notes |
 |---|---|---|
-| [02a - Durable Review State and Queue Rendering](02a-durable-review-state-and-queue-rendering.md) | Next | Introduces `review/review-items.json`, stable IDs, idempotent Phase 1 review import, and rendered markdown queues backed by durable state. |
-| [02b - Actionable Review Workflow](02b-actionable-review-workflow.md) | Pending | Adds explain/accept/reject/defer commands, supported Phase 2 accept actions, and bounded review behavior. |
+| [02a - Durable Review State and Queue Rendering](02a-durable-review-state-and-queue-rendering.md) | Complete | Introduced `review/review-items.json`, stable IDs, idempotent Phase 1 review import, and rendered markdown queues backed by durable state. |
+| [02b - Actionable Review Workflow](02b-actionable-review-workflow.md) | Next | Adds explain/accept/reject/defer commands, supported Phase 2 accept actions, and bounded review behavior. |
 | [02c - Explore and Citation Surfaces](02c-explore-and-citation-surfaces.md) | Pending | Adds `kb explore` and phase-2 citation blocks for retrieval commands. |
 | [02d - Usage and Search-Miss Feedback](02d-usage-and-search-miss-feedback.md) | Pending | Adds usage logging, `kb log-use`, `kb usage`, search-miss logging, and miss promotion into review. |
 | [02e - Preamble Install, Ingest Reports, and Session Proof](02e-preamble-ingest-reports-and-session-proof.md) | Pending | Adds `kb init --hooks`, revised `PREAMBLE.md`, ingest report polish, and end-to-end normal-session verification. |
 
 ## Milestone Order
 
-1. [02a - Durable Review State and Queue Rendering](02a-durable-review-state-and-queue-rendering.md) - next
+1. [02a - Durable Review State and Queue Rendering](02a-durable-review-state-and-queue-rendering.md) - complete
    - Creates the machine-readable review state model with stable IDs and keeps markdown review files as rendered inspection surfaces.
-2. [02b - Actionable Review Workflow](02b-actionable-review-workflow.md) - pending
+2. [02b - Actionable Review Workflow](02b-actionable-review-workflow.md) - next
    - Makes review items explainable and resolvable without manual file edits while keeping the workflow bounded.
 3. [02c - Explore and Citation Surfaces](02c-explore-and-citation-surfaces.md) - pending
    - Adds broad-recall ideation retrieval and citation-ready output for agent-facing commands.

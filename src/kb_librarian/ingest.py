@@ -21,6 +21,7 @@ from kb_librarian.providers import (
     operation_route,
     provider_from_config,
 )
+from kb_librarian.review import add_review_item, queue_duplicate_review_item, queue_unsupported_file_review_item
 from kb_librarian.search_index import query_candidates, score_document, tokenize_query
 from kb_librarian.storage import (
     NOTE_ID_REFERENCE_PATTERN,
@@ -79,6 +80,7 @@ def ingest(
         if path.suffix.lower() not in SUPPORTED_SUFFIXES:
             report.unsupported_files += 1
             _log_error(data_dir, f"Unsupported ingest file extension for {path}")
+            queue_unsupported_file_review_item(data_dir, source_path=path)
             continue
 
         try:
@@ -87,6 +89,13 @@ def ingest(
             if duplicate_path is not None:
                 report.duplicates += 1
                 report.archived_paths.append(duplicate_path)
+                queue_duplicate_review_item(
+                    data_dir,
+                    source_name=parsed.path.name,
+                    source_path=parsed.path,
+                    source_hash=parsed.digest,
+                    archived_path=duplicate_path,
+                )
                 continue
             if _has_filename_with_different_hash(data_dir, parsed):
                 report.warnings.append(f"Possible updated version: {path.name}")
@@ -519,9 +528,6 @@ def _append_merge_review(
     target_note_ids: list[str],
     rationale: str,
 ) -> str | None:
-    review_path = data_dir / "review" / "pending-merge.md"
-    _ensure_review_file(review_path, "# Pending Merge\n\n")
-
     fingerprint = _review_fingerprint(
         "merge",
         source_hash=parsed.digest,
@@ -529,30 +535,23 @@ def _append_merge_review(
         candidate_body=candidate.body,
         target_note_ids=target_note_ids,
     )
-    content = review_path.read_text(encoding="utf-8")
-    if f"fingerprint: {fingerprint}" in content:
-        return None
-
-    item_id = f"merge-{date.today().isoformat()}-{fingerprint[:8]}"
-    rendered = [
-        f"## item: {item_id}",
-        "",
-        f"Source: `{parsed.path.as_posix()}`",
-        f"Source hash: `{parsed.digest}`",
-        f"Target note IDs: {', '.join(target_note_ids)}",
-        f"Rationale: {rationale or 'Provider reported adds_nuance.'}",
-        "Suggested action: review and merge manually.",
-        f"- fingerprint: {fingerprint}",
-        f"- candidate_title: {candidate.title}",
-        "- candidate_body:",
-        "```markdown",
-        _ensure_trailing_newline(candidate.body).rstrip("\n"),
-        "```",
-        "",
-    ]
-    with review_path.open("a", encoding="utf-8") as handle:
-        handle.write("\n".join(rendered))
-    return item_id
+    return add_review_item(
+        data_dir,
+        queue="merge",
+        title=candidate.title,
+        target_notes=target_note_ids,
+        proposed_action="review and merge manually",
+        payload={
+            "source": parsed.path.as_posix(),
+            "source_hash": parsed.digest,
+            "target_note_ids": ", ".join(target_note_ids),
+            "rationale": rationale or "Provider reported adds_nuance.",
+            "candidate_title": candidate.title,
+            "candidate_body": _ensure_trailing_newline(candidate.body).rstrip("\n"),
+        },
+        priority="medium",
+        fingerprint=fingerprint,
+    )
 
 
 def _append_dispute_review(
@@ -563,26 +562,30 @@ def _append_dispute_review(
     target_note_ids: list[str],
     rationale: str,
 ) -> None:
-    review_path = data_dir / "review" / "disputes.md"
-    _ensure_review_file(review_path, "# Disputes\n\n")
-
-    item_id = f"dispute-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"
-    rendered = [
-        f"## item: {item_id}",
-        "",
-        f"Source: `{parsed.path.as_posix()}`",
-        f"Source hash: `{parsed.digest}`",
-        f"Target note IDs: {', '.join(target_note_ids)}",
-        f"Rationale: {rationale or 'Provider reported contradiction.'}",
-        f"- candidate_title: {candidate.title}",
-        "- candidate_body:",
-        "```markdown",
-        _ensure_trailing_newline(candidate.body).rstrip("\n"),
-        "```",
-        "",
-    ]
-    with review_path.open("a", encoding="utf-8") as handle:
-        handle.write("\n".join(rendered))
+    fingerprint = _review_fingerprint(
+        "dispute",
+        source_hash=parsed.digest,
+        candidate_title=candidate.title,
+        candidate_body=candidate.body,
+        target_note_ids=target_note_ids,
+    )
+    add_review_item(
+        data_dir,
+        queue="dispute",
+        title=candidate.title,
+        target_notes=target_note_ids,
+        proposed_action="review contradiction manually",
+        payload={
+            "source": parsed.path.as_posix(),
+            "source_hash": parsed.digest,
+            "target_note_ids": ", ".join(target_note_ids),
+            "rationale": rationale or "Provider reported contradiction.",
+            "candidate_title": candidate.title,
+            "candidate_body": _ensure_trailing_newline(candidate.body).rstrip("\n"),
+        },
+        priority="high",
+        fingerprint=fingerprint,
+    )
 
 
 def _mark_disputed(
@@ -653,30 +656,33 @@ def _append_classification_review(
     classification: ClassificationResult,
     reason: str | None = None,
 ) -> None:
-    review_path = data_dir / "review" / "pending-classification.md"
-    _ensure_review_file(review_path, "# Pending Classification\n\n")
-    item_id = f"classification-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"
-    rendered = [
-        f"## item: {item_id}",
-        "",
-        f"Source: `{parsed.path.as_posix()}`",
-        f"Reason: {reason or classification.reason or 'low confidence or ambiguous classification'}",
-        "",
-        f"- title: {candidate.title}",
-        f"- summary: {candidate.summary}",
-        f"- suggested_topic: {classification.topic}",
-        f"- suggested_type: {classification.knowledge_type}",
-        f"- confidence: {classification.confidence}",
-        "",
-    ]
-    with review_path.open("a", encoding="utf-8") as handle:
-        handle.write("\n".join(rendered))
-
-
-def _ensure_review_file(path: Path, header: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        path.write_text(header, encoding="utf-8")
+    payload = {
+        "source": parsed.path.as_posix(),
+        "source_hash": parsed.digest,
+        "reason": reason or classification.reason or "low confidence or ambiguous classification",
+        "title": candidate.title,
+        "summary": candidate.summary,
+        "suggested_topic": classification.topic,
+        "suggested_type": classification.knowledge_type,
+        "confidence": classification.confidence,
+    }
+    fingerprint = _review_fingerprint(
+        "classification",
+        source_hash=parsed.digest,
+        candidate_title=candidate.title,
+        candidate_body=json.dumps(payload, sort_keys=True),
+        target_note_ids=[],
+    )
+    add_review_item(
+        data_dir,
+        queue="classification",
+        title=candidate.title,
+        target_notes=[],
+        proposed_action="review classification manually",
+        payload=payload,
+        priority="medium",
+        fingerprint=fingerprint,
+    )
 
 
 def _review_fingerprint(

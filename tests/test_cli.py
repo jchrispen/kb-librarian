@@ -253,6 +253,7 @@ def test_kb_review_lists_bounded_items(tmp_path):
         "2026-05-05T09:00:01 Unsupported ingest file extension for /tmp/example.pdf\n",
         encoding="utf-8",
     )
+    (tmp_path / "review" / "review-items.json").unlink()
     config = default_config(tmp_path)
     config["review"]["max_review_items_per_run"] = 3
     write_config_file(tmp_path / ".kb" / "config.yaml", config)
