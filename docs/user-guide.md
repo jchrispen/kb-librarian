@@ -121,10 +121,13 @@ kb reindex --data-dir /path/to/kb
 This rebuilds generated artifacts such as:
 
 - top-level and topic `INDEX.md` files
+- paginated `INDEX-2.md`, `INDEX-3.md`, and later markdown index pages when a configured page size is exceeded
 - `.kb/backlinks.json`
 - `.kb/index-manifest.json`
 - `.kb/stats.json`
 - `.kb/fts.sqlite`
+
+Pagination keeps large markdown indexes readable for humans. Retrieval commands continue to use note metadata and `.kb/fts.sqlite`, not the paginated markdown files.
 
 To detect overlapping notes and queue compaction plus hygiene work:
 
@@ -133,6 +136,24 @@ kb reindex --scan-clusters --data-dir /path/to/kb
 ```
 
 This scan respects `review.duplicate_cluster_threshold`, `review.compaction_cooldown_days`, `review.stale_after_days`, and `review.orphan_after_days`. It creates or refreshes review items only; it does not rewrite notes.
+
+## Check KB Health
+
+Run `kb doctor` when retrieval looks stale, after manual edits, after a sync conflict, or before trusting a large KB handoff:
+
+```bash
+kb doctor --data-dir /path/to/kb
+```
+
+Doctor prints grouped `ok`, `warn`, and `error` findings. Errors produce a nonzero exit code. Warnings usually point to rebuildable generated state or provider setup that only matters when running provider-backed commands.
+
+For a fast offline confidence check of the local package:
+
+```bash
+kb doctor --self-test
+```
+
+The self-test uses a temporary KB and the deterministic mock provider. It does not mutate your configured KB.
 
 ## Search and Inspect Notes
 
@@ -327,4 +348,5 @@ In the current shipped CLI, accept actions are supported for classification, mer
 8. Run `kb log-use` after citing a note in agent work.
 9. Run `kb usage` periodically to inspect retrieval and note-use signals.
 10. Run `kb reindex --scan-clusters` periodically when note overlap is likely.
-11. Check `kb review` periodically for classification, merge, compaction, dispute, search-miss, duplicate, and unsupported-file items.
+11. Run `kb doctor` when generated state, review state, or provider setup may be stale.
+12. Check `kb review` periodically for classification, merge, compaction, dispute, search-miss, duplicate, and unsupported-file items.

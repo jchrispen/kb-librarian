@@ -98,6 +98,8 @@ def default_config(data_dir: str | Path = DEFAULT_DATA_DIR, *, hooks: bool = Fal
         "indexes": {
             "topic_sort": "alphabetical",
             "top_level_min_notes": 1,
+            "topic_page_size": 50,
+            "top_level_page_size": 100,
         },
         "review": {
             "stale_after_days": 180,
@@ -252,3 +254,11 @@ def validate_config(config: Mapping[str, Any]) -> None:
             raise ConfigError(f"Config operation {operation}.model must be a non-empty string.")
         if provider not in providers:
             raise ConfigError(f"Config operation {operation} references unknown provider {provider!r}.")
+
+    indexes = config["indexes"]
+    for key in ("topic_page_size", "top_level_page_size"):
+        if key not in indexes:
+            continue
+        value = indexes[key]
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ConfigError(f"Config key indexes.{key} must be a positive integer.")

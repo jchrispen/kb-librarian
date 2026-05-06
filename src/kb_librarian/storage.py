@@ -72,7 +72,7 @@ def iter_note_files(data_dir: Path) -> list[Path]:
 
     files: list[Path] = []
     for path in sorted(topics_root.rglob("*.md")):
-        if path.name == "INDEX.md":
+        if _is_generated_index_file(path):
             continue
         files.append(path)
     return files
@@ -111,3 +111,11 @@ def ensure_unique_note_ids(records: Iterable[NoteRecord]) -> None:
 
 def existing_note_ids(records: Iterable[NoteRecord]) -> set[str]:
     return {record.note_id for record in records}
+
+
+def _is_generated_index_file(path: Path) -> bool:
+    if path.name == "INDEX.md":
+        return True
+    if not path.name.startswith("INDEX-") or path.suffix != ".md":
+        return False
+    return path.stem.removeprefix("INDEX-").isdigit()

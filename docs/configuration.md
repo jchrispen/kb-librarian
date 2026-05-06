@@ -71,6 +71,8 @@ ingest:
 indexes:
   topic_sort: alphabetical
   top_level_min_notes: 1
+  topic_page_size: 50
+  top_level_page_size: 100
 
 review:
   stale_after_days: 180
@@ -123,6 +125,17 @@ Useful retrieval settings:
 - `body_weight`: body text match weight
 
 Retrieval commands also write append-only usage signals to `.kb/usage.log`. Empty, weak, or explicitly reported poor searches write `.kb/search-misses.log`; suspect-note feedback from `kb flag-suspect` is also appended to `.kb/usage.log`. Aggregate counters in `.kb/stats.json` are rebuildable from those logs.
+
+## Index Settings
+
+Useful index settings:
+
+- `topic_sort`: ordering policy for generated topic listings
+- `top_level_min_notes`: configured threshold reserved for top-level index summaries
+- `topic_page_size`: note rows per topic index page before `INDEX-2.md`, `INDEX-3.md`, and later pages are generated
+- `top_level_page_size`: topic rows per top-level index page before root `INDEX-2.md`, `INDEX-3.md`, and later pages are generated
+
+Paginated markdown indexes are human inspection surfaces. `kb search`, `kb context`, and `kb explore` use the local lexical index and note metadata, not paginated markdown files.
 
 ## Ingest Settings
 

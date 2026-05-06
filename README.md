@@ -6,7 +6,7 @@ It stores durable knowledge as markdown files in a separate data directory, buil
 
 ## Status
 
-This repository currently ships the Phase 1 core workflow, Phase 2 daily-use ergonomics, the Phase 3a compaction proposal flow, and the Phase 3b hygiene signal queues:
+This repository currently ships the Phase 1 core workflow, Phase 2 daily-use ergonomics, Phase 3a compaction proposals, Phase 3b hygiene signal queues, and Phase 3c diagnostics/scaled indexes:
 
 - `kb init`
 - `kb add`
@@ -21,8 +21,9 @@ This repository currently ships the Phase 1 core workflow, Phase 2 daily-use erg
 - `kb log-use`
 - `kb flag-suspect`
 - `kb usage`
+- `kb doctor`
 
-Planned later-phase features such as doctor diagnostics, topic reorganization, and automation templates are documented in the design and implementation plans, but they are not part of the shipped CLI yet.
+Planned later-phase features such as topic reorganization and automation templates are documented in the design and implementation plans, but they are not part of the shipped CLI yet.
 
 ## What It Does
 
@@ -33,6 +34,7 @@ Planned later-phase features such as doctor diagnostics, topic reorganization, a
 - Returns compact, cited context for coding and design tasks
 - Detects overlapping note clusters and drafts reviewable compaction proposals without rewriting notes
 - Surfaces stale, orphan, and low-utility notes with explainable review evidence
+- Reports KB health with read-only doctor diagnostics and an offline self-test
 
 ## Install
 
@@ -126,6 +128,7 @@ Important review files:
 - `kb add`: create a note directly, or queue raw input when metadata is incomplete
 - `kb ingest`: process markdown or text files into notes or review items
 - `kb reindex`: rebuild markdown indexes, backlinks, manifest, stats, lexical index, and optionally scan compaction clusters
+- `kb doctor`: inspect config, notes, review state, generated indexes, retrieval state, ingest errors, and provider routes
 - `kb compact`: draft a review-gated canonical note proposal for a topic or cluster
 - `kb search`: search notes by title, summary, tags, retrieval phrases, and body text
 - `kb get`: inspect one note by ID

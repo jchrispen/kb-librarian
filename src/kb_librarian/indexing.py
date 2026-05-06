@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -11,6 +12,10 @@ from typing import Any, Iterable, Mapping
 from kb_librarian.search_index import build_lexical_index
 from kb_librarian.storage import NOTE_ID_REFERENCE_PATTERN, NoteRecord, ensure_unique_note_ids, load_note_records
 from kb_librarian.usage import usage_stats_payload
+
+DEFAULT_TOPIC_PAGE_SIZE = 50
+DEFAULT_TOP_LEVEL_PAGE_SIZE = 100
+GENERATED_INDEX_PAGE_PATTERN = re.compile(r"^INDEX-[1-9][0-9]*\.md$")
 
 
 @dataclass(frozen=True)
@@ -26,6 +31,12 @@ class ReindexResult:
     low_utility_review_items: list[str] | None = None
 
 
+@dataclass(frozen=True)
+class RenderedIndexPage:
+    path: Path
+    content: str
+
+
 def reindex_data_dir(
     data_dir: Path,
     *,
@@ -34,20 +45,16 @@ def reindex_data_dir(
 ) -> ReindexResult:
     records = load_note_records(data_dir, validate=True)
     ensure_unique_note_ids(records)
-    grouped = _group_by_topic(records)
-    for topic_dir in sorted((data_dir / "topics").glob("*")):
-        if topic_dir.is_dir():
-            grouped.setdefault(topic_dir.name, [])
+    grouped = group_records_for_indexing(data_dir, records)
 
     artifacts: list[Path] = []
-    top_index = data_dir / "INDEX.md"
-    _write_if_changed(top_index, _render_top_level_index(data_dir, grouped))
-    artifacts.append(top_index)
-
-    for topic, topic_records in sorted(grouped.items()):
-        topic_index_path = data_dir / "topics" / topic / "INDEX.md"
-        _write_if_changed(topic_index_path, _render_topic_index(topic, topic_records))
-        artifacts.append(topic_index_path)
+    index_pages = render_index_pages(data_dir, grouped, config=config)
+    expected_index_paths = {page.path for page in index_pages}
+    for page in index_pages:
+        _write_if_changed(page.path, page.content)
+        artifacts.append(page.path)
+    for stale_page in _stale_generated_index_pages(data_dir, expected_index_paths):
+        stale_page.unlink()
 
     backlinks_path = data_dir / ".kb" / "backlinks.json"
     backlinks_payload = _build_backlinks(records)
@@ -69,7 +76,12 @@ def reindex_data_dir(
     artifacts.append(fts_path)
 
     manifest_path = data_dir / ".kb" / "index-manifest.json"
-    manifest_payload = _build_manifest(records, grouped, backend=backend)
+    manifest_payload = _build_manifest(
+        records,
+        grouped,
+        backend=backend,
+        generated_artifacts=[path.relative_to(data_dir).as_posix() for path in expected_index_paths],
+    )
     _write_json_if_changed(manifest_path, manifest_payload)
     artifacts.append(manifest_path)
 
@@ -126,6 +138,36 @@ def index_document(record: NoteRecord) -> dict[str, str]:
     }
 
 
+def group_records_for_indexing(data_dir: Path, records: Iterable[NoteRecord]) -> dict[str, list[NoteRecord]]:
+    grouped = _group_by_topic(records)
+    for topic_dir in sorted((data_dir / "topics").glob("*")):
+        if topic_dir.is_dir():
+            grouped.setdefault(topic_dir.name, [])
+    return grouped
+
+
+def render_index_pages(
+    data_dir: Path,
+    grouped: Mapping[str, list[NoteRecord]],
+    *,
+    config: Mapping[str, Any] | None = None,
+) -> list[RenderedIndexPage]:
+    top_level_page_size = _configured_page_size(
+        config,
+        key="top_level_page_size",
+        default=DEFAULT_TOP_LEVEL_PAGE_SIZE,
+    )
+    topic_page_size = _configured_page_size(
+        config,
+        key="topic_page_size",
+        default=DEFAULT_TOPIC_PAGE_SIZE,
+    )
+    pages = _render_top_level_index_pages(data_dir, grouped, page_size=top_level_page_size)
+    for topic, topic_records in sorted(grouped.items()):
+        pages.extend(_render_topic_index_pages(data_dir, topic, topic_records, page_size=topic_page_size))
+    return pages
+
+
 def _group_by_topic(records: Iterable[NoteRecord]) -> dict[str, list[NoteRecord]]:
     grouped: dict[str, list[NoteRecord]] = {}
     for record in records:
@@ -136,19 +178,55 @@ def _group_by_topic(records: Iterable[NoteRecord]) -> dict[str, list[NoteRecord]
     return grouped
 
 
-def _render_top_level_index(data_dir: Path, grouped: Mapping[str, list[NoteRecord]]) -> str:
+def _render_top_level_index_pages(
+    data_dir: Path,
+    grouped: Mapping[str, list[NoteRecord]],
+    *,
+    page_size: int,
+) -> list[RenderedIndexPage]:
+    topics = sorted(grouped.items())
+    chunks = _paginate(topics, page_size)
+    if not chunks:
+        chunks = [[]]
+    total_pages = len(chunks)
+    pages: list[RenderedIndexPage] = []
+    for page_number, chunk in enumerate(chunks, start=1):
+        pages.append(
+            RenderedIndexPage(
+                path=data_dir / _index_page_filename(page_number),
+                content=_render_top_level_index_page(
+                    data_dir,
+                    chunk,
+                    page_number=page_number,
+                    total_pages=total_pages,
+                ),
+            )
+        )
+    return pages
+
+
+def _render_top_level_index_page(
+    data_dir: Path,
+    topics: list[tuple[str, list[NoteRecord]]],
+    *,
+    page_number: int,
+    total_pages: int,
+) -> str:
     lines = [
         "# Knowledge Base",
         "",
         "This is an agent context artifact. Prefer `kb context`, `kb explore`, or `kb search` for retrieval.",
         "",
     ]
-    if not grouped:
+    if total_pages > 1:
+        lines.extend(_render_page_navigation(page_number, total_pages))
+
+    if not topics:
         lines.append("- No topics indexed yet.")
         lines.append("")
         return "\n".join(lines)
 
-    for topic, records in sorted(grouped.items()):
+    for topic, records in topics:
         topic_dir = data_dir / "topics" / topic
         description = _topic_scope_summary(topic_dir)
         lines.append(
@@ -158,13 +236,52 @@ def _render_top_level_index(data_dir: Path, grouped: Mapping[str, list[NoteRecor
     return "\n".join(lines)
 
 
-def _render_topic_index(topic: str, records: list[NoteRecord]) -> str:
+def _render_topic_index_pages(
+    data_dir: Path,
+    topic: str,
+    records: list[NoteRecord],
+    *,
+    page_size: int,
+) -> list[RenderedIndexPage]:
+    chunks = _paginate(records, page_size)
+    if not chunks:
+        chunks = [[]]
+    total_pages = len(chunks)
+    pages: list[RenderedIndexPage] = []
+    for page_number, chunk in enumerate(chunks, start=1):
+        pages.append(
+            RenderedIndexPage(
+                path=data_dir / "topics" / topic / _index_page_filename(page_number),
+                content=_render_topic_index_page(
+                    topic,
+                    chunk,
+                    page_number=page_number,
+                    total_pages=total_pages,
+                ),
+            )
+        )
+    return pages
+
+
+def _render_topic_index_page(
+    topic: str,
+    records: list[NoteRecord],
+    *,
+    page_number: int,
+    total_pages: int,
+) -> str:
     lines = [
         f"# Topic Index: {topic}",
         "",
-        "| ID | Title | Summary | Type | Confidence | Status | Updated |",
-        "|---|---|---|---|---|---|---|",
     ]
+    if total_pages > 1:
+        lines.extend(_render_page_navigation(page_number, total_pages))
+    lines.extend(
+        [
+            "| ID | Title | Summary | Type | Confidence | Status | Updated |",
+            "|---|---|---|---|---|---|---|",
+        ]
+    )
     for record in records:
         fm = record.note.frontmatter
         note_id = str(fm["id"])
@@ -179,6 +296,40 @@ def _render_topic_index(topic: str, records: list[NoteRecord]) -> str:
         )
     lines.append("")
     return "\n".join(lines)
+
+
+def _paginate(items: Iterable[Any], page_size: int) -> list[list[Any]]:
+    materialized = list(items)
+    if not materialized:
+        return []
+    size = max(1, page_size)
+    return [materialized[start : start + size] for start in range(0, len(materialized), size)]
+
+
+def _render_page_navigation(page_number: int, total_pages: int) -> list[str]:
+    lines = [f"Page {page_number} of {total_pages}."]
+    navigation: list[str] = []
+    if page_number > 1:
+        navigation.append(f"[Previous]({_index_page_filename(page_number - 1)})")
+    if page_number < total_pages:
+        navigation.append(f"[Next]({_index_page_filename(page_number + 1)})")
+    if navigation:
+        lines.append(f"Navigation: {' | '.join(navigation)}")
+    page_links: list[str] = []
+    for candidate in range(1, total_pages + 1):
+        if candidate == page_number:
+            page_links.append(str(candidate))
+        else:
+            page_links.append(f"[{candidate}]({_index_page_filename(candidate)})")
+    lines.append(f"Pages: {' | '.join(page_links)}")
+    lines.append("")
+    return lines
+
+
+def _index_page_filename(page_number: int) -> str:
+    if page_number <= 1:
+        return "INDEX.md"
+    return f"INDEX-{page_number}.md"
 
 
 def _build_backlinks(records: Iterable[NoteRecord]) -> dict[str, list[str]]:
@@ -220,6 +371,7 @@ def _build_manifest(
     grouped: Mapping[str, list[NoteRecord]],
     *,
     backend: str,
+    generated_artifacts: list[str],
 ) -> dict[str, Any]:
     updated_dates = [date.fromisoformat(str(record.note.frontmatter["updated"])) for record in records]
     if updated_dates:
@@ -235,6 +387,7 @@ def _build_manifest(
         "topic_count": len(grouped),
         "index_backend": backend,
         "indexed_files": indexed_files,
+        "generated_artifacts": sorted(generated_artifacts),
     }
 
 
@@ -258,6 +411,37 @@ def _topic_scope_summary(topic_dir: Path) -> str:
 def _escape_table_cell(value: str) -> str:
     compact = " ".join(value.splitlines()).strip()
     return compact.replace("|", "\\|")
+
+
+def _configured_page_size(
+    config: Mapping[str, Any] | None,
+    *,
+    key: str,
+    default: int,
+) -> int:
+    if not isinstance(config, Mapping):
+        return default
+    indexes = config.get("indexes")
+    if not isinstance(indexes, Mapping):
+        return default
+    value = indexes.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return default
+    return value
+
+
+def _stale_generated_index_pages(data_dir: Path, expected_paths: set[Path]) -> list[Path]:
+    candidates = [path for path in data_dir.glob("INDEX-*.md") if _is_generated_index_page(path)]
+    topics_root = data_dir / "topics"
+    if topics_root.exists():
+        candidates.extend(
+            path for path in topics_root.rglob("INDEX-*.md") if _is_generated_index_page(path)
+        )
+    return sorted(path for path in candidates if path not in expected_paths)
+
+
+def _is_generated_index_page(path: Path) -> bool:
+    return GENERATED_INDEX_PAGE_PATTERN.match(path.name) is not None
 
 
 def _write_if_changed(path: Path, content: str) -> bool:

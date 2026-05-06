@@ -13,6 +13,12 @@ from kb_librarian import __version__
 from kb_librarian.config import load_config, resolve_data_dir
 from kb_librarian.compaction import draft_compaction_proposal
 from kb_librarian.context import CONTEXT_MODES, build_context, build_explore
+from kb_librarian.doctor import (
+    render_doctor_report,
+    render_self_test_report,
+    run_doctor,
+    run_doctor_self_test,
+)
 from kb_librarian.errors import (
     AmbiguousNoteIdError,
     KBLibrarianError,
@@ -70,6 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_log_use_parser(subcommands)
     _add_flag_suspect_parser(subcommands)
     _add_usage_parser(subcommands)
+    _add_doctor_parser(subcommands)
     return parser
 
 
@@ -169,6 +176,21 @@ def _add_reindex_parser(subcommands: argparse._SubParsersAction[argparse.Argumen
         help="Detect overlapping note clusters and queue compaction review items.",
     )
     parser.set_defaults(handler=_handle_reindex)
+
+
+def _add_doctor_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subcommands.add_parser(
+        "doctor",
+        help="Inspect KB artifact health.",
+        description="Run read-only diagnostics for config, notes, review state, generated indexes, and providers.",
+    )
+    parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Run a tiny offline fixture through mock provider, ingest, reindex, search, and doctor checks.",
+    )
+    parser.set_defaults(handler=_handle_doctor)
 
 
 def _add_search_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -594,6 +616,18 @@ def _handle_reindex(args: argparse.Namespace) -> int:
     result = reindex_data_dir(data_dir, config=config, scan_clusters=bool(args.scan_clusters))
     _print_reindex_result(result)
     return 0
+
+
+def _handle_doctor(args: argparse.Namespace) -> int:
+    if args.self_test:
+        report = run_doctor_self_test()
+        print(render_self_test_report(report), end="")
+        return 1 if report.error_count else 0
+
+    data_dir = resolve_data_dir(args.data_dir)
+    report = run_doctor(data_dir)
+    print(render_doctor_report(report), end="")
+    return 1 if report.error_count else 0
 
 
 def _handle_compact(args: argparse.Namespace) -> int:

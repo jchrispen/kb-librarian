@@ -88,6 +88,14 @@ kb reindex --data-dir <path>
 
 That rebuilds generated indexes and metadata from the canonical note files.
 
+To inspect stale or broken generated state without mutating the KB, run:
+
+```bash
+kb doctor --data-dir <path>
+```
+
+Doctor returns nonzero for errors such as invalid notes, duplicate note IDs, broken note references, unreadable review state, or stale lexical index contents.
+
 ## I am not sure which data directory the CLI is using
 
 The resolution order is:

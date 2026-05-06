@@ -31,6 +31,22 @@ Rebuild markdown and lexical indexes from note files. Use `--scan-clusters` to a
 kb reindex [--data-dir <path>] [--scan-clusters]
 ```
 
+Large top-level and topic indexes are paginated deterministically according to `indexes.top_level_page_size` and `indexes.topic_page_size`. Pagination affects only the published markdown inspection surfaces; retrieval commands use generated local indexes and note metadata.
+
+## `kb doctor`
+
+Run read-only diagnostics for the KB artifact and local generated state.
+
+```bash
+kb doctor [--data-dir <path>] [--self-test]
+```
+
+`kb doctor` groups findings by subsystem and prints `ok`, `warn`, or `error` severities. It returns nonzero when any `error` finding is present.
+
+Checks include required layout, config validity, note schema validity, duplicate IDs, broken note ID references, review state readability, markdown index freshness, backlinks, manifest freshness, lexical index freshness, raw ingest errors, and provider route presence.
+
+`kb doctor --self-test` creates a temporary KB, configures the deterministic mock provider, ingests one tiny fixture, rebuilds indexes, searches it, and runs doctor against the fixture. It is offline and does not mutate your configured KB.
+
 ## `kb search`
 
 Search note titles, summaries, tags, retrieval phrases, and bodies.
@@ -179,5 +195,4 @@ kb usage [--since <duration>] [--note <id>] [--data-dir <path>]
 
 The current shipped CLI does not yet include these planned commands:
 
-- `kb doctor`
 - topic reorganization commands

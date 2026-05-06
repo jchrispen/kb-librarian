@@ -42,6 +42,44 @@ def test_kb_help_smoke():
     assert "init" in result.stdout
     assert "add" in result.stdout
     assert "search" in result.stdout
+    assert "doctor" in result.stdout
+
+
+def test_kb_doctor_self_test_smoke():
+    result = run_cli("doctor", "--self-test")
+
+    assert result.returncode == 0
+    assert "KB Doctor self-test" in result.stdout
+    assert "Self-test passed." in result.stdout
+
+
+def test_kb_doctor_returns_nonzero_for_errors(tmp_path):
+    init_result = run_cli("init", "--data-dir", str(tmp_path))
+    assert init_result.returncode == 0
+
+    source = tmp_path / "broken.md"
+    source.write_text(
+        "# Broken reference\n\nThis links to 2026-05-05-missing-note.\n",
+        encoding="utf-8",
+    )
+    add_result = run_cli(
+        "add",
+        "--data-dir",
+        str(tmp_path),
+        "--topic",
+        "agent-systems",
+        "--type",
+        "technique",
+        "--from-file",
+        str(source),
+    )
+    assert add_result.returncode == 0
+
+    result = run_cli("doctor", "--data-dir", str(tmp_path))
+
+    assert result.returncode == 1
+    assert "KB Doctor:" in result.stdout
+    assert "[error] broken-note-link" in result.stdout
 
 
 def test_kb_init_smoke_and_idempotency(tmp_path):

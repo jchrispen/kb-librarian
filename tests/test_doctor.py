@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+import json
+
+from kb_librarian.config import default_config, write_config_file
+from kb_librarian.doctor import render_doctor_report, render_self_test_report, run_doctor, run_doctor_self_test
+from kb_librarian.indexing import reindex_data_dir
+from kb_librarian.init import initialize_data_dir
+from kb_librarian.notes import Note, write_note
+from kb_librarian.storage import canonical_note_path
+
+
+def _frontmatter(
+    *,
+    note_id: str,
+    title: str,
+    topic: str = "agent-systems",
+) -> dict[str, object]:
+    return {
+        "id": note_id,
+        "title": title,
+        "summary": "Summary text.",
+        "topic": topic,
+        "created": "2026-05-05",
+        "updated": "2026-05-05",
+        "knowledge_type": "technique",
+        "status": "active",
+        "confidence": "high",
+        "retrieval_phrases": ["doctor test"],
+        "tags": ["diagnostics"],
+    }
+
+
+def _mock_config(data_dir):
+    config = default_config(data_dir)
+    config["providers"]["mock"] = {}
+    for operation in list(config["operations"]):
+        config["operations"][operation] = {"provider": "mock", "model": f"mock-{operation}"}
+    write_config_file(data_dir / ".kb" / "config.yaml", config)
+    return config
+
+
+def test_doctor_reports_healthy_kb_after_reindex(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = _mock_config(tmp_path)
+    note = Note(
+        _frontmatter(note_id="2026-05-05-doctor-health", title="Doctor health"),
+        "Local diagnostics should stay read-only.\n",
+    )
+    write_note(canonical_note_path(tmp_path, "agent-systems", "2026-05-05-doctor-health"), note)
+    reindex_data_dir(tmp_path, config=config)
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 0
+    assert "[ok] config-valid" in rendered
+    assert "[ok] fts-current" in rendered
+    assert "[ok] provider-routes" in rendered
+
+
+def test_doctor_reports_broken_links_and_stale_fts(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = _mock_config(tmp_path)
+    first = Note(
+        _frontmatter(note_id="2026-05-05-first-note", title="First note"),
+        "This note links to 2026-05-05-missing-note.\n",
+    )
+    write_note(canonical_note_path(tmp_path, "agent-systems", "2026-05-05-first-note"), first)
+    reindex_data_dir(tmp_path, config=config)
+
+    second = Note(
+        _frontmatter(note_id="2026-05-05-second-note", title="Second note"),
+        "This note was added after reindex.\n",
+    )
+    write_note(canonical_note_path(tmp_path, "agent-systems", "2026-05-05-second-note"), second)
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count >= 2
+    assert "broken-note-link" in rendered
+    assert "fts-stale" in rendered
+    assert "markdown-index-stale" in rendered
+
+
+def test_doctor_reports_duplicate_ids_and_unreadable_review_state(tmp_path):
+    initialize_data_dir(tmp_path)
+    _mock_config(tmp_path)
+    note_id = "2026-05-05-duplicate-note"
+    first = Note(_frontmatter(note_id=note_id, title="Duplicate A", topic="agent-systems"), "A.\n")
+    second = Note(_frontmatter(note_id=note_id, title="Duplicate B", topic="coding-techniques"), "B.\n")
+    write_note(canonical_note_path(tmp_path, "agent-systems", note_id), first)
+    write_note(canonical_note_path(tmp_path, "coding-techniques", note_id), second)
+    (tmp_path / "review" / "review-items.json").write_text("{not-json", encoding="utf-8")
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count >= 2
+    assert "duplicate-note-id" in rendered
+    assert "review-state-unreadable" in rendered
+
+
+def test_doctor_self_test_runs_offline_fixture():
+    report = run_doctor_self_test()
+    rendered = render_self_test_report(report)
+
+    assert report.error_count == 0
+    assert "Self-test passed." in rendered
+    assert "[ok] ingest" in rendered
+    assert "[ok] search" in rendered
+
+
+def test_doctor_detects_stale_manifest(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = _mock_config(tmp_path)
+    note = Note(
+        _frontmatter(note_id="2026-05-05-manifest-note", title="Manifest note"),
+        "Manifest should track indexed files.\n",
+    )
+    write_note(canonical_note_path(tmp_path, "agent-systems", "2026-05-05-manifest-note"), note)
+    reindex_data_dir(tmp_path, config=config)
+    manifest_path = tmp_path / ".kb" / "index-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["indexed_files"] = []
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 0
+    assert "manifest-stale" in rendered
