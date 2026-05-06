@@ -11,10 +11,10 @@ from typing import Sequence
 
 from kb_librarian import __version__
 from kb_librarian.config import load_config, resolve_data_dir
+from kb_librarian.context import CONTEXT_MODES, build_context
 from kb_librarian.errors import (
     AmbiguousNoteIdError,
     KBLibrarianError,
-    MilestoneNotImplementedError,
     NoteNotFoundError,
     NoteValidationError,
 )
@@ -22,6 +22,7 @@ from kb_librarian.indexing import ReindexResult, reindex_data_dir
 from kb_librarian.init import initialize_data_dir
 from kb_librarian.ingest import ingest, render_report
 from kb_librarian.notes import KNOWLEDGE_TYPES, Note, body_template, generate_note_id, parse_note_text, write_note
+from kb_librarian.review import collect_review_summary, render_review_summary
 from kb_librarian.search_index import query_candidates, score_document, tokenize_query
 from kb_librarian.storage import (
     canonical_note_path,
@@ -31,9 +32,6 @@ from kb_librarian.storage import (
     load_note_records,
     normalize_topic_for_path,
 )
-
-PHASE = "Phase 01c"
-
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -49,7 +47,8 @@ def build_parser() -> argparse.ArgumentParser:
     _add_search_parser(subcommands)
     _add_get_parser(subcommands)
     _add_ingest_parser(subcommands)
-    _add_placeholder_parsers(subcommands)
+    _add_review_parser(subcommands)
+    _add_context_parser(subcommands)
     return parser
 
 
@@ -84,40 +83,26 @@ def _add_init_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentPa
     init_parser.set_defaults(handler=_handle_init)
 
 
-def _add_placeholder_parsers(
-    subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
-) -> None:
-    context_parser = _placeholder_parser(subcommands, "context", "Return task-shaped context.")
-    context_parser.add_argument("task", nargs="?", help="Future task description.")
-    context_parser.add_argument("--mode", help="Future context mode.")
-    context_parser.add_argument("--budget", type=int, help="Future token budget.")
-    context_parser.add_argument("--json", action="store_true", help="Future JSON output.")
-
-    review_parser = _placeholder_parser(subcommands, "review", "Inspect review queues.")
-    review_parser.add_argument(
-        "action",
-        nargs="?",
-        choices=("list", "accept", "reject", "defer", "explain"),
-        help="Future review action.",
-    )
-
-
-def _placeholder_parser(
-    subcommands: argparse._SubParsersAction[argparse.ArgumentParser],
-    name: str,
-    help_text: str,
-) -> argparse.ArgumentParser:
+def _add_context_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = subcommands.add_parser(
-        name,
-        help=help_text,
-        description=f"{help_text} This command is not implemented in {PHASE}.",
+        "context",
+        help="Return compact task-shaped context with source citations.",
+        description="Retrieve high-precision context for a task and synthesize a compact cited response.",
     )
+    parser.add_argument("task", help="Task description used for context retrieval.")
+    parser.add_argument(
+        "--mode",
+        choices=CONTEXT_MODES,
+        default="coding",
+        help="Context mode: coding, architecture, debugging, writing, research, review.",
+    )
+    parser.add_argument("--budget", type=int, help="Context token budget.")
+    parser.add_argument("--json", action="store_true", help="Return machine-readable JSON output.")
     parser.add_argument(
         "--data-dir",
         help="KB data directory. Overrides KB_DATA_DIR and configured defaults.",
     )
-    parser.set_defaults(handler=_handle_placeholder)
-    return parser
+    parser.set_defaults(handler=_handle_context)
 
 
 def _add_add_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -183,6 +168,22 @@ def _add_ingest_parser(subcommands: argparse._SubParsersAction[argparse.Argument
     parser.set_defaults(handler=_handle_ingest)
 
 
+def _add_review_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subcommands.add_parser(
+        "review",
+        help="Inspect review queues.",
+        description="Print bounded review counts and queue excerpts.",
+    )
+    parser.add_argument(
+        "action",
+        nargs="?",
+        choices=("list",),
+        help="Optional alias. `list` is equivalent to `kb review`.",
+    )
+    parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
+    parser.set_defaults(handler=_handle_review)
+
+
 def _handle_init(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     created = initialize_data_dir(data_dir, hooks=args.hooks)
@@ -192,10 +193,6 @@ def _handle_init(args: argparse.Namespace) -> int:
     else:
         print("Already initialized; no files changed.")
     return 0
-
-
-def _handle_placeholder(args: argparse.Namespace) -> int:
-    raise MilestoneNotImplementedError(f"kb {args.command} is not implemented in {PHASE}.")
 
 
 def _handle_ingest(args: argparse.Namespace) -> int:
@@ -214,6 +211,88 @@ def _handle_ingest(args: argparse.Namespace) -> int:
     elif report.errors:
         print(f"error: ingest completed with {report.errors} errors; see {data_dir / '.kb' / 'errors.log'}", file=sys.stderr)
     return 1 if report.errors else 0
+
+
+def _handle_review(args: argparse.Namespace) -> int:
+    data_dir = resolve_data_dir(args.data_dir)
+    initialize_data_dir(data_dir)
+    config = load_config(data_dir)
+    max_items = int(config.get("review", {}).get("max_review_items_per_run", 10))
+    counts, items = collect_review_summary(data_dir, max_items=max_items)
+    print(render_review_summary(counts, items, max_items=max_items), end="")
+    return 0
+
+
+def _handle_context(args: argparse.Namespace) -> int:
+    data_dir = resolve_data_dir(args.data_dir)
+    initialize_data_dir(data_dir)
+    config = load_config(data_dir)
+
+    mode = str(args.mode or "coding")
+    if mode not in CONTEXT_MODES:
+        allowed = ", ".join(CONTEXT_MODES)
+        raise KBLibrarianError(f"Unsupported mode {mode!r}; expected one of: {allowed}")
+
+    budget = args.budget if args.budget is not None else int(config["retrieval"]["context_budget_tokens"])
+    if budget <= 0:
+        raise KBLibrarianError("Context budget must be a positive integer.")
+
+    result = build_context(
+        data_dir,
+        config=config,
+        task=str(args.task).strip(),
+        mode=mode,
+        budget=budget,
+    )
+
+    if args.json:
+        payload = {
+            "task": result.task,
+            "mode": result.mode,
+            "budget": result.budget,
+            "message": result.message,
+            "synthesis_markdown": result.synthesis_markdown,
+            "selected_notes": [
+                {
+                    "note_id": item.note_id,
+                    "title": item.title,
+                    "summary": item.summary,
+                    "topic": item.topic,
+                    "knowledge_type": item.knowledge_type,
+                    "status": item.status,
+                    "confidence": item.confidence,
+                    "updated": item.updated,
+                    "path": item.path,
+                    "excerpt": item.excerpt,
+                    "score": item.score,
+                    "reasons": item.reasons,
+                    "trust_flags": item.trust_flags,
+                }
+                for item in result.selected_notes
+            ],
+            "citations": result.citations,
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if result.message:
+        print(result.message)
+        print(f"Try: kb search {json.dumps(result.task)}")
+        return 0
+
+    print("# KB Context")
+    print("")
+    if result.synthesis_markdown:
+        print(result.synthesis_markdown)
+        print("")
+    print("## Source notes")
+    for item in result.selected_notes:
+        trust_text = ", ".join(item.trust_flags) if item.trust_flags else "ok"
+        print(
+            f"- [{item.note_id}]({item.path}) — confidence: {item.confidence}, "
+            f"status: {item.status}, trust: {trust_text}"
+        )
+    return 0
 
 
 def _handle_add(args: argparse.Namespace) -> int:

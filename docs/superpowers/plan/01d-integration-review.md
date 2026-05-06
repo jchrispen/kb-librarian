@@ -2,6 +2,26 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
+Status: Complete
+Completed: 2026-05-05
+Archive note: This milestone plan is retained as the completed implementation record. Do not delete it; future work should treat it as historical context and build from Phase 01e unless a regression in this milestone is found.
+
+## Completion Record
+
+Implemented in:
+
+- `src/kb_librarian/cli.py`
+- `src/kb_librarian/ingest.py`
+- `src/kb_librarian/providers.py`
+- `src/kb_librarian/review.py`
+- `tests/test_cli.py`
+- `tests/test_ingest.py`
+- `tests/test_providers.py`
+
+Verified with:
+
+- `pytest -q` -> 44 passed
+
 ## Goal
 
 Make ingest trust-preserving. At the end of this milestone, extracted candidates are compared with existing notes, integration verdicts are applied safely, and basic review surfaces classification, merge, dispute, duplicate, and unsupported-file work.

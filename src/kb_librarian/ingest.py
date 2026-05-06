@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -12,15 +13,18 @@ from typing import Any, Mapping
 
 from kb_librarian.errors import IngestError, NoteValidationError, ProviderError
 from kb_librarian.indexing import reindex_data_dir
-from kb_librarian.notes import Note, generate_note_id, write_note
+from kb_librarian.notes import Note, generate_note_id, read_note, write_note
 from kb_librarian.providers import (
     CandidateNote,
     ClassificationResult,
+    IntegrationResult,
     operation_route,
     provider_from_config,
 )
 from kb_librarian.search_index import query_candidates, score_document, tokenize_query
 from kb_librarian.storage import (
+    NOTE_ID_REFERENCE_PATTERN,
+    NoteRecord,
     canonical_note_path,
     ensure_topic_layout,
     ensure_unique_note_ids,
@@ -31,6 +35,7 @@ from kb_librarian.storage import (
 
 
 SUPPORTED_SUFFIXES = {".md", ".txt"}
+MATCH_CAP = 12
 
 
 @dataclass(frozen=True)
@@ -44,7 +49,11 @@ class ParsedInput:
 class IngestReport:
     processed_files: int = 0
     created_notes: list[str] = field(default_factory=list)
+    source_appends: list[str] = field(default_factory=list)
+    merge_proposals: list[str] = field(default_factory=list)
+    disputes: list[str] = field(default_factory=list)
     classification_items: list[Path] = field(default_factory=list)
+    review_paths: list[Path] = field(default_factory=list)
     skipped_candidates: int = 0
     duplicates: int = 0
     unsupported_files: int = 0
@@ -122,6 +131,9 @@ def render_report(report: IngestReport) -> str:
         "Ingest report:",
         f"processed_files: {report.processed_files}",
         f"created_notes: {len(report.created_notes)}",
+        f"source_appends: {len(report.source_appends)}",
+        f"merge_proposals: {len(report.merge_proposals)}",
+        f"disputes: {len(report.disputes)}",
         f"classification_items: {len(report.classification_items)}",
         f"skipped_candidates: {report.skipped_candidates}",
         f"duplicates: {report.duplicates}",
@@ -129,11 +141,17 @@ def render_report(report: IngestReport) -> str:
         f"errors: {report.errors}",
     ]
     if report.created_notes:
-        lines.append("note_ids:")
+        lines.append("created_note_ids:")
         lines.extend(f"- {note_id}" for note_id in report.created_notes)
-    if report.classification_items:
+    if report.source_appends:
+        lines.append("source_appended_note_ids:")
+        lines.extend(f"- {note_id}" for note_id in report.source_appends)
+    if report.disputes:
+        lines.append("disputed_note_ids:")
+        lines.extend(f"- {note_id}" for note_id in sorted(set(report.disputes)))
+    if report.review_paths:
         lines.append("review_paths:")
-        for path in sorted(set(report.classification_items)):
+        for path in sorted(set(report.review_paths)):
             lines.append(f"- {path}")
     if report.archived_paths:
         lines.append("archived_paths:")
@@ -174,8 +192,10 @@ def _ingest_one(
 ) -> None:
     extract_route = operation_route(config, "extract")
     classify_route = operation_route(config, "classify")
+    integrate_route = operation_route(config, "integrate")
     extractor = provider_from_config(config, extract_route.provider, env=env)
     classifier = provider_from_config(config, classify_route.provider, env=env)
+    integrator = provider_from_config(config, integrate_route.provider, env=env)
 
     ingest_config = config.get("ingest", {})
     max_notes = int(ingest_config.get("max_notes_per_doc", 7))
@@ -203,31 +223,229 @@ def _ingest_one(
         if _needs_classification_review(config, candidate, classification):
             _append_classification_review(data_dir, parsed=parsed, candidate=candidate, classification=classification)
             report.classification_items.append(data_dir / "review" / "pending-classification.md")
+            report.review_paths.append(data_dir / "review" / "pending-classification.md")
             continue
-        if _has_existing_match(data_dir, config=config, candidate=candidate, classification=classification):
+
+        matches = _candidate_matches(
+            data_dir,
+            config=config,
+            records=records,
+            candidate=candidate,
+            classification=classification,
+            cap=MATCH_CAP,
+        )
+
+        try:
+            integration = integrator.integration_verdict(
+                candidate=candidate,
+                classification=classification,
+                matches=matches,
+                text=parsed.text,
+                source_path=parsed.path,
+                model=integrate_route.model,
+            )
+            target_records = _target_records(matches, records, integration)
+        except ProviderError as exc:
+            report.errors += 1
             _append_classification_review(
                 data_dir,
                 parsed=parsed,
                 candidate=candidate,
                 classification=classification,
-                reason="possible existing note match; integration verdict deferred to Phase 01d",
+                reason=f"integration verdict error: {exc}",
             )
-            report.classification_items.append(data_dir / "review" / "pending-classification.md")
+            review_path = data_dir / "review" / "pending-classification.md"
+            report.classification_items.append(review_path)
+            report.review_paths.append(review_path)
             continue
 
-        note_id = generate_note_id(candidate.title, date.today(), existing_ids=existing_ids)
-        existing_ids.add(note_id)
-        note = _candidate_to_note(
-            candidate,
-            classification=classification,
-            note_id=note_id,
-            source_path=parsed.path,
-        )
-        ensure_topic_layout(data_dir, classification.topic)
-        path = canonical_note_path(data_dir, classification.topic, note_id)
-        write_note(path, note)
+        mutated = False
+        if integration.verdict == "unrelated":
+            note_id = generate_note_id(candidate.title, date.today(), existing_ids=existing_ids)
+            existing_ids.add(note_id)
+            note = _candidate_to_note(
+                candidate,
+                classification=classification,
+                note_id=note_id,
+                source_path=parsed.path,
+                source_hash=parsed.digest,
+            )
+            ensure_topic_layout(data_dir, classification.topic)
+            path = canonical_note_path(data_dir, classification.topic, note_id)
+            write_note(path, note)
+            report.created_notes.append(note_id)
+            mutated = True
+        elif integration.verdict == "identical":
+            for record in target_records:
+                if _append_source_to_note(record.path, source_path=parsed.path, source_hash=parsed.digest):
+                    report.source_appends.append(record.note_id)
+                    mutated = True
+        elif integration.verdict == "adds_nuance":
+            queued = _append_merge_review(
+                data_dir,
+                parsed=parsed,
+                candidate=candidate,
+                target_note_ids=[record.note_id for record in target_records],
+                rationale=integration.rationale,
+            )
+            if queued:
+                report.merge_proposals.append(queued)
+            report.review_paths.append(data_dir / "review" / "pending-merge.md")
+        elif integration.verdict == "contradicts":
+            disputed_ids = _mark_disputed(
+                target_records,
+                parsed=parsed,
+                candidate=candidate,
+                rationale=integration.rationale,
+            )
+            report.disputes.extend(disputed_ids)
+            if disputed_ids:
+                mutated = True
+            _append_dispute_review(
+                data_dir,
+                parsed=parsed,
+                candidate=candidate,
+                target_note_ids=[record.note_id for record in target_records],
+                rationale=integration.rationale,
+            )
+            report.review_paths.append(data_dir / "review" / "disputes.md")
+        else:
+            report.errors += 1
+            _append_classification_review(
+                data_dir,
+                parsed=parsed,
+                candidate=candidate,
+                classification=classification,
+                reason=f"unknown integration verdict: {integration.verdict}",
+            )
+            report.classification_items.append(data_dir / "review" / "pending-classification.md")
+            report.review_paths.append(data_dir / "review" / "pending-classification.md")
+
+        if mutated:
+            reindex_data_dir(data_dir)
+            records = load_note_records(data_dir, validate=True)
+            ensure_unique_note_ids(records)
+            existing_ids = existing_note_ids(records)
+
+
+def _target_records(
+    matches: list[dict[str, Any]],
+    records: list[NoteRecord],
+    integration: IntegrationResult,
+) -> list[NoteRecord]:
+    by_id = {record.note_id: record for record in records}
+    match_ids = {str(item.get("note_id", "")) for item in matches}
+    target_records: list[NoteRecord] = []
+    for note_id in integration.target_note_ids:
+        if integration.verdict != "unrelated" and note_id not in match_ids:
+            raise ProviderError(
+                f"Integration verdict returned target note ID {note_id!r} not present in candidate matches."
+            )
+        record = by_id.get(note_id)
+        if record is None:
+            raise ProviderError(f"Integration verdict target note ID {note_id!r} does not exist.")
+        target_records.append(record)
+
+    if integration.verdict != "unrelated" and not target_records:
+        raise ProviderError(f"Integration verdict {integration.verdict!r} requires at least one target record.")
+    return target_records
+
+
+def _candidate_matches(
+    data_dir: Path,
+    *,
+    config: Mapping[str, Any],
+    records: list[NoteRecord],
+    candidate: CandidateNote,
+    classification: ClassificationResult,
+    cap: int,
+) -> list[dict[str, Any]]:
+    retrieval = config.get("retrieval", {})
+    by_id = {record.note_id: record for record in records}
+    score_by_id: dict[str, float] = {}
+    reasons_by_id: dict[str, set[str]] = {}
+
+    candidate_topic = normalize_topic_for_path(classification.topic)
+    parent_topic = _parent_topic(classification.topic)
+    candidate_tags = {normalize_topic_for_path(tag) for tag in candidate.tags}
+    candidate_phrases = {item.strip().lower() for item in candidate.retrieval_phrases if item.strip()}
+    explicit_ids = set(NOTE_ID_REFERENCE_PATTERN.findall(f"{candidate.title}\n{candidate.summary}\n{candidate.body}"))
+
+    for record in records:
+        fm = record.note.frontmatter
+        note_id = record.note_id
+        note_topic = normalize_topic_for_path(str(fm.get("topic", "")))
+        note_tags = {normalize_topic_for_path(str(item)) for item in _coerce_string_list(fm.get("tags", []))}
+        note_phrases = {item.strip().lower() for item in _coerce_string_list(fm.get("retrieval_phrases", [])) if item.strip()}
+
+        if note_topic == candidate_topic:
+            _bump_match(score_by_id, reasons_by_id, note_id, 65.0, "topic")
+        if parent_topic and note_topic == parent_topic:
+            _bump_match(score_by_id, reasons_by_id, note_id, 50.0, "parent_topic")
+
+        shared_tags = candidate_tags & note_tags
+        if shared_tags:
+            _bump_match(score_by_id, reasons_by_id, note_id, min(30.0, 12.0 * len(shared_tags)), "tags")
+
+        shared_phrases = candidate_phrases & note_phrases
+        if shared_phrases:
+            _bump_match(score_by_id, reasons_by_id, note_id, min(30.0, 10.0 * len(shared_phrases)), "retrieval_phrases")
+
+        if note_id in explicit_ids:
+            _bump_match(score_by_id, reasons_by_id, note_id, 90.0, "explicit_note_id")
+
+        note_title = str(fm.get("title", "")).strip().lower()
+        if note_title and note_title == candidate.title.strip().lower():
+            _bump_match(score_by_id, reasons_by_id, note_id, 40.0, "title")
+
+    fts_path = data_dir / ".kb" / "fts.sqlite"
+    if records and not fts_path.exists():
         reindex_data_dir(data_dir)
-        report.created_notes.append(note_id)
+    query = " ".join([candidate.title, candidate.summary, *candidate.retrieval_phrases, *candidate.tags]).strip()
+    if query and fts_path.exists():
+        tokens = tokenize_query(query)
+        lexical = query_candidates(fts_path, query=query, topic=None, knowledge_type=None)
+        for match in lexical[:30]:
+            note_id = str(match.get("id", ""))
+            if note_id not in by_id:
+                continue
+            lexical_score = score_document(match, query=query, tokens=tokens, weights=retrieval)
+            if lexical_score <= 0:
+                continue
+            _bump_match(
+                score_by_id,
+                reasons_by_id,
+                note_id,
+                min(35.0, float(lexical_score)),
+                "lexical",
+            )
+
+    ranked = sorted(
+        score_by_id.items(),
+        key=lambda item: (-item[1], item[0]),
+    )
+
+    rendered: list[dict[str, Any]] = []
+    for note_id, score in ranked[:cap]:
+        record = by_id[note_id]
+        fm = record.note.frontmatter
+        rendered.append(
+            {
+                "note_id": record.note_id,
+                "topic": str(fm.get("topic", "")),
+                "title": str(fm.get("title", "")),
+                "summary": str(fm.get("summary", "")),
+                "knowledge_type": str(fm.get("knowledge_type", "")),
+                "status": str(fm.get("status", "")),
+                "tags": _coerce_string_list(fm.get("tags", [])),
+                "retrieval_phrases": _coerce_string_list(fm.get("retrieval_phrases", [])),
+                "path": record.path.as_posix(),
+                "score": round(score, 2),
+                "reasons": sorted(reasons_by_id.get(note_id, set())),
+                "excerpt": _excerpt(record.note.body),
+            }
+        )
+    return rendered
 
 
 def _candidate_to_note(
@@ -236,6 +454,7 @@ def _candidate_to_note(
     classification: ClassificationResult,
     note_id: str,
     source_path: Path,
+    source_hash: str,
 ) -> Note:
     today = date.today().isoformat()
     tags = candidate.tags or [normalize_topic_for_path(classification.topic)]
@@ -250,7 +469,7 @@ def _candidate_to_note(
         "status": "active",
         "confidence": classification.confidence,
         "basis": ["ingested source"],
-        "sources": [{"type": "ingest", "ref": source_path.as_posix()}],
+        "sources": [{"type": "ingest", "ref": source_path.as_posix(), "hash": source_hash}],
         "retrieval_phrases": candidate.retrieval_phrases,
         "agent_use": candidate.agent_use or [],
         "applies_when": candidate.applies_when or [],
@@ -263,6 +482,153 @@ def _candidate_to_note(
     note = Note(frontmatter=frontmatter, body=_ensure_trailing_newline(candidate.body))
     note.validate()
     return note
+
+
+def _append_source_to_note(path: Path, *, source_path: Path, source_hash: str) -> bool:
+    note = read_note(path)
+    frontmatter = dict(note.frontmatter)
+    existing_sources = frontmatter.get("sources")
+    if not isinstance(existing_sources, list):
+        existing_sources = []
+
+    source_ref = source_path.as_posix()
+    for item in existing_sources:
+        if not isinstance(item, Mapping):
+            continue
+        if item.get("hash") == source_hash or item.get("ref") == source_ref:
+            return False
+
+    appended = {
+        "type": "ingest",
+        "ref": source_ref,
+        "hash": source_hash,
+    }
+    frontmatter["sources"] = [*existing_sources, appended]
+    frontmatter["updated"] = date.today().isoformat()
+    updated = Note(frontmatter=frontmatter, body=note.body)
+    updated.validate()
+    write_note(path, updated)
+    return True
+
+
+def _append_merge_review(
+    data_dir: Path,
+    *,
+    parsed: ParsedInput,
+    candidate: CandidateNote,
+    target_note_ids: list[str],
+    rationale: str,
+) -> str | None:
+    review_path = data_dir / "review" / "pending-merge.md"
+    _ensure_review_file(review_path, "# Pending Merge\n\n")
+
+    fingerprint = _review_fingerprint(
+        "merge",
+        source_hash=parsed.digest,
+        candidate_title=candidate.title,
+        candidate_body=candidate.body,
+        target_note_ids=target_note_ids,
+    )
+    content = review_path.read_text(encoding="utf-8")
+    if f"fingerprint: {fingerprint}" in content:
+        return None
+
+    item_id = f"merge-{date.today().isoformat()}-{fingerprint[:8]}"
+    rendered = [
+        f"## item: {item_id}",
+        "",
+        f"Source: `{parsed.path.as_posix()}`",
+        f"Source hash: `{parsed.digest}`",
+        f"Target note IDs: {', '.join(target_note_ids)}",
+        f"Rationale: {rationale or 'Provider reported adds_nuance.'}",
+        "Suggested action: review and merge manually.",
+        f"- fingerprint: {fingerprint}",
+        f"- candidate_title: {candidate.title}",
+        "- candidate_body:",
+        "```markdown",
+        _ensure_trailing_newline(candidate.body).rstrip("\n"),
+        "```",
+        "",
+    ]
+    with review_path.open("a", encoding="utf-8") as handle:
+        handle.write("\n".join(rendered))
+    return item_id
+
+
+def _append_dispute_review(
+    data_dir: Path,
+    *,
+    parsed: ParsedInput,
+    candidate: CandidateNote,
+    target_note_ids: list[str],
+    rationale: str,
+) -> None:
+    review_path = data_dir / "review" / "disputes.md"
+    _ensure_review_file(review_path, "# Disputes\n\n")
+
+    item_id = f"dispute-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"
+    rendered = [
+        f"## item: {item_id}",
+        "",
+        f"Source: `{parsed.path.as_posix()}`",
+        f"Source hash: `{parsed.digest}`",
+        f"Target note IDs: {', '.join(target_note_ids)}",
+        f"Rationale: {rationale or 'Provider reported contradiction.'}",
+        f"- candidate_title: {candidate.title}",
+        "- candidate_body:",
+        "```markdown",
+        _ensure_trailing_newline(candidate.body).rstrip("\n"),
+        "```",
+        "",
+    ]
+    with review_path.open("a", encoding="utf-8") as handle:
+        handle.write("\n".join(rendered))
+
+
+def _mark_disputed(
+    records: list[NoteRecord],
+    *,
+    parsed: ParsedInput,
+    candidate: CandidateNote,
+    rationale: str,
+) -> list[str]:
+    fingerprint = _review_fingerprint(
+        "dispute",
+        source_hash=parsed.digest,
+        candidate_title=candidate.title,
+        candidate_body=candidate.body,
+        target_note_ids=[record.note_id for record in records],
+    )
+    changed: list[str] = []
+    today = date.today().isoformat()
+    for record in records:
+        note = read_note(record.path)
+        frontmatter = dict(note.frontmatter)
+        frontmatter["status"] = "disputed"
+        frontmatter["updated"] = today
+
+        disputes = frontmatter.get("disputes")
+        if not isinstance(disputes, list):
+            disputes = []
+        if not any(isinstance(item, Mapping) and item.get("fingerprint") == fingerprint for item in disputes):
+            disputes.append(
+                {
+                    "fingerprint": fingerprint,
+                    "reported_at": datetime.now().isoformat(timespec="seconds"),
+                    "source_ref": parsed.path.as_posix(),
+                    "source_hash": parsed.digest,
+                    "candidate_title": candidate.title,
+                    "target_note_ids": [item.note_id for item in records],
+                    "rationale": rationale,
+                }
+            )
+        frontmatter["disputes"] = disputes
+
+        updated = Note(frontmatter=frontmatter, body=note.body)
+        updated.validate()
+        write_note(record.path, updated)
+        changed.append(record.note_id)
+    return changed
 
 
 def _needs_classification_review(
@@ -279,31 +645,6 @@ def _needs_classification_review(
     return False
 
 
-def _has_existing_match(
-    data_dir: Path,
-    *,
-    config: Mapping[str, Any],
-    candidate: CandidateNote,
-    classification: ClassificationResult,
-) -> bool:
-    fts_path = data_dir / ".kb" / "fts.sqlite"
-    if not fts_path.exists():
-        reindex_data_dir(data_dir)
-    query = " ".join([candidate.title, candidate.summary, *candidate.retrieval_phrases]).strip()
-    if not query:
-        return False
-    matches = query_candidates(fts_path, query=query, topic=None, knowledge_type=None)
-    tokens = tokenize_query(query)
-    retrieval = config.get("retrieval", {})
-    for match in matches[:20]:
-        score = score_document(match, query=query, tokens=tokens, weights=retrieval)
-        same_title = match["title"].strip().lower() == candidate.title.strip().lower()
-        same_topic = match["topic"].strip().lower() == classification.topic.strip().lower()
-        if same_title or (same_topic and score >= 20):
-            return True
-    return False
-
-
 def _append_classification_review(
     data_dir: Path,
     *,
@@ -313,9 +654,7 @@ def _append_classification_review(
     reason: str | None = None,
 ) -> None:
     review_path = data_dir / "review" / "pending-classification.md"
-    review_path.parent.mkdir(parents=True, exist_ok=True)
-    if not review_path.exists():
-        review_path.write_text("# Pending Classification\n\n", encoding="utf-8")
+    _ensure_review_file(review_path, "# Pending Classification\n\n")
     item_id = f"classification-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"
     rendered = [
         f"## item: {item_id}",
@@ -332,6 +671,31 @@ def _append_classification_review(
     ]
     with review_path.open("a", encoding="utf-8") as handle:
         handle.write("\n".join(rendered))
+
+
+def _ensure_review_file(path: Path, header: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text(header, encoding="utf-8")
+
+
+def _review_fingerprint(
+    prefix: str,
+    *,
+    source_hash: str,
+    candidate_title: str,
+    candidate_body: str,
+    target_note_ids: list[str],
+) -> str:
+    payload = {
+        "prefix": prefix,
+        "source_hash": source_hash,
+        "candidate_title": candidate_title.strip(),
+        "candidate_body": candidate_body.strip(),
+        "target_note_ids": sorted(set(target_note_ids)),
+    }
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+    return digest[:16]
 
 
 def _normalize_document_text(text: str) -> str:
@@ -453,3 +817,41 @@ def _log_error(data_dir: Path, message: str) -> None:
 
 def _ensure_trailing_newline(text: str) -> str:
     return text if text.endswith("\n") else text + "\n"
+
+
+def _excerpt(text: str, limit: int = 280) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3].rstrip() + "..."
+
+
+def _parent_topic(topic: str) -> str | None:
+    segments = [part.strip() for part in re.split(r"[\\/]+", topic) if part.strip()]
+    if len(segments) < 2:
+        return None
+    return normalize_topic_for_path("/".join(segments[:-1]))
+
+
+def _coerce_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        stripped = item.strip()
+        if stripped:
+            items.append(stripped)
+    return items
+
+
+def _bump_match(
+    score_by_id: dict[str, float],
+    reasons_by_id: dict[str, set[str]],
+    note_id: str,
+    score: float,
+    reason: str,
+) -> None:
+    score_by_id[note_id] = score_by_id.get(note_id, 0.0) + score
+    reasons_by_id.setdefault(note_id, set()).add(reason)

@@ -7,6 +7,7 @@ import pytest
 from kb_librarian.errors import ProviderError
 from kb_librarian.providers import (
     MockProvider,
+    validate_integration_payload,
     parse_json_response,
     validate_classification_payload,
     validate_extraction_payload,
@@ -94,3 +95,49 @@ def test_mock_provider_is_deterministic():
     assert extraction.candidates[0].title == "CLI context"
     assert classification.topic == "agent-systems"
     assert classification.confidence == "high"
+
+
+def test_mock_provider_synthesize_context_is_grounded():
+    provider = MockProvider()
+
+    result = provider.synthesize_context(
+        task="review this architecture",
+        mode="architecture",
+        budget=1800,
+        selected_notes=[
+            {
+                "note_id": "2026-05-04-agent-context-cli-contract",
+                "title": "Use a CLI as the stable contract",
+                "summary": "A stable CLI lets multiple agents access the same artifact.",
+                "trust_flags": [],
+            }
+        ],
+    )
+
+    assert "## Directly relevant techniques" in result
+    assert "[2026-05-04-agent-context-cli-contract]" in result
+    assert "## Suggested agent behavior" in result
+
+
+def test_validate_integration_payload():
+    result = validate_integration_payload(
+        {
+            "verdict": "identical",
+            "target_note_ids": ["2026-05-04-agent-context-cli-contract"],
+            "rationale": "same idea",
+        }
+    )
+
+    assert result.verdict == "identical"
+    assert result.target_note_ids == ["2026-05-04-agent-context-cli-contract"]
+
+
+def test_validate_integration_payload_rejects_invalid_targets():
+    with pytest.raises(ProviderError, match="requires at least one target note ID"):
+        validate_integration_payload(
+            {
+                "verdict": "adds_nuance",
+                "target_note_ids": [],
+                "rationale": "missing target",
+            }
+        )

@@ -2,6 +2,30 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
+Status: Complete
+Completed: 2026-05-05
+Archive note: This milestone plan is retained as the completed implementation record. Do not delete it; future work should treat it as historical context and build from Phase 02 unless a regression in this milestone is found.
+
+## Completion Record
+
+Implemented in:
+
+- `src/kb_librarian/cli.py`
+- `src/kb_librarian/context.py`
+- `src/kb_librarian/providers.py`
+- `tests/test_cli.py`
+- `tests/test_context.py`
+- `tests/test_providers.py`
+
+Verified with:
+
+- `pytest -q` -> 49 passed
+- Manual acceptance:
+  - Seeded 24 notes in `/tmp/kb-librarian-01e-manual`, then ran:
+    - `PYTHONPATH=src python3 -m kb_librarian.cli reindex --data-dir /tmp/kb-librarian-01e-manual`
+    - `PYTHONPATH=src python3 -m kb_librarian.cli context "review this architecture" --mode architecture --budget 1800 --data-dir /tmp/kb-librarian-01e-manual`
+  - Observed result: compact markdown context with the required sections and cited source note IDs/relative paths, confidence, and status without requiring direct KB browsing.
+
 ## Goal
 
 Finish the Phase 1 proof: an agent can call `kb context` with a task and receive compact, useful, cited context from the local KB without reading the full artifact.

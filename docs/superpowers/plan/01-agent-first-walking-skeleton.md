@@ -15,8 +15,8 @@ Phase 1 starts from an empty tool repo and should not depend on later-phase ergo
 | [01a - Scaffold, Config, and Note Model](01a-scaffold-config-note-model.md) | Complete | Implemented package scaffold, config/init, note model/templates, and tests. Retained as completed record. |
 | [01b - Index, Search, Get, and Add](01b-index-search-get-add.md) | Complete | Implemented add/reindex/search/get, storage/indexing modules, and milestone tests. Retained as completed record. |
 | [01c - Provider and Ingest](01c-provider-and-ingest.md) | Complete | Implemented provider abstraction, Anthropic/mock providers, markdown/txt ingest, dedup/archive behavior, review routing, and tests. Retained as completed record. |
-| [01d - Integration and Basic Review](01d-integration-review.md) | Pending | Next. Depends on 01a, 01b, and 01c. |
-| [01e - Context and End-to-End Proof](01e-context-e2e.md) | Pending | Depends on 01a through 01d. |
+| [01d - Integration and Basic Review](01d-integration-review.md) | Complete | Implemented candidate matching, integration verdict handling, source append/merge/dispute flows, basic review summaries, and tests. Retained as completed record. |
+| [01e - Context and End-to-End Proof](01e-context-e2e.md) | Complete | Implemented `kb context`, mode-aware precision ranking, provider-backed synthesis, citation output, and end-to-end tests/manual acceptance. Retained as completed record. |
 
 ## Milestone Order
 
@@ -26,9 +26,9 @@ Phase 1 starts from an empty tool repo and should not depend on later-phase ergo
    - Adds direct note creation, deterministic generated indexes, local lexical search, and note inspection.
 3. [01c - Provider and Ingest](01c-provider-and-ingest.md) - complete
    - Adds the provider abstraction, Anthropic adapter, mock provider, markdown/txt ingest, extraction, classification, dedup, and raw archiving.
-4. [01d - Integration and Basic Review](01d-integration-review.md) - next
+4. [01d - Integration and Basic Review](01d-integration-review.md) - complete
    - Adds candidate matching, integration verdict handling, source appends, merge/dispute review queues, and basic review output.
-5. [01e - Context and End-to-End Proof](01e-context-e2e.md) - pending
+5. [01e - Context and End-to-End Proof](01e-context-e2e.md) - complete
    - Adds `kb context`, context modes, synthesis, source citations, and the 20-50 note acceptance scenario.
 
 Each milestone should leave the CLI runnable and covered by focused tests. Later milestones may adjust earlier code, but they should preserve the public behavior accepted by earlier milestones.

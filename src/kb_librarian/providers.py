@@ -17,6 +17,7 @@ from kb_librarian.storage import normalize_topic_for_path
 
 
 UTILITY_SCORES = {"high", "medium", "low"}
+INTEGRATION_VERDICTS = {"identical", "adds_nuance", "contradicts", "unrelated"}
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,13 @@ class OperationRoute:
     model: str
 
 
+@dataclass(frozen=True)
+class IntegrationResult:
+    verdict: str
+    target_note_ids: list[str]
+    rationale: str = ""
+
+
 class LLMProvider(Protocol):
     """Provider operations needed across Phase 1 milestones."""
 
@@ -79,8 +87,17 @@ class LLMProvider(Protocol):
     ) -> ClassificationResult:
         """Classify a candidate into topic and note type."""
 
-    def integration_verdict(self, **kwargs: object) -> str:
-        """Return a future integration verdict."""
+    def integration_verdict(
+        self,
+        *,
+        candidate: CandidateNote,
+        classification: ClassificationResult,
+        matches: list[dict[str, Any]],
+        text: str,
+        source_path: Path,
+        model: str,
+    ) -> IntegrationResult:
+        """Return a verdict describing how to integrate a candidate."""
 
     def synthesize_context(self, **kwargs: object) -> str:
         """Return future task-shaped context."""
@@ -201,13 +218,110 @@ class MockProvider:
             reason=reason,
         )
 
-    def integration_verdict(self, **kwargs: object) -> str:
-        del kwargs
-        return "unrelated"
+    def integration_verdict(
+        self,
+        *,
+        candidate: CandidateNote,
+        classification: ClassificationResult,
+        matches: list[dict[str, Any]],
+        text: str,
+        source_path: Path,
+        model: str,
+    ) -> IntegrationResult:
+        del classification, source_path, model
+        target_note_ids = _clean_string_list([item.get("note_id", "") for item in matches], "matches.note_id")
+        if target_note_ids:
+            target_note_ids = target_note_ids[:3]
+        lowered = f"{candidate.title}\n{candidate.summary}\n{candidate.body}\n{text}".lower()
+        if target_note_ids and any(token in lowered for token in ("identical", "duplicate", "same as")):
+            return IntegrationResult(
+                verdict="identical",
+                target_note_ids=[target_note_ids[0]],
+                rationale="mock keyword match for identical",
+            )
+        if target_note_ids and any(token in lowered for token in ("adds nuance", "additional nuance", "extends")):
+            return IntegrationResult(
+                verdict="adds_nuance",
+                target_note_ids=[target_note_ids[0]],
+                rationale="mock keyword match for adds_nuance",
+            )
+        if target_note_ids and any(token in lowered for token in ("contradict", "conflict", "opposes")):
+            return IntegrationResult(
+                verdict="contradicts",
+                target_note_ids=[target_note_ids[0]],
+                rationale="mock keyword match for contradicts",
+            )
+        return IntegrationResult(
+            verdict="unrelated",
+            target_note_ids=[],
+            rationale="mock default unrelated verdict",
+        )
 
     def synthesize_context(self, **kwargs: object) -> str:
-        del kwargs
-        return ""
+        task = str(kwargs.get("task", "")).strip()
+        mode = str(kwargs.get("mode", "")).strip() or "coding"
+        selected_notes = kwargs.get("selected_notes")
+        if not isinstance(selected_notes, list):
+            selected_notes = []
+
+        lines = [
+            "## Directly relevant techniques",
+        ]
+        if selected_notes:
+            for note in selected_notes[:3]:
+                if not isinstance(note, Mapping):
+                    continue
+                note_id = str(note.get("note_id", "")).strip()
+                summary = str(note.get("summary", "")).strip()
+                if note_id and summary:
+                    lines.append(f"- [{note_id}] {summary}")
+        else:
+            lines.append("- No selected notes.")
+
+        lines.extend(
+            [
+                "",
+                "## Applicable heuristics",
+            ]
+        )
+        if selected_notes:
+            for note in selected_notes[:3]:
+                if not isinstance(note, Mapping):
+                    continue
+                note_id = str(note.get("note_id", "")).strip()
+                title = str(note.get("title", "")).strip()
+                if note_id and title:
+                    lines.append(f"- [{note_id}] Apply {title.lower()} for {mode} work.")
+        else:
+            lines.append("- No applicable heuristics found.")
+
+        lines.extend(
+            [
+                "",
+                "## Warnings / failure modes",
+            ]
+        )
+        warned = False
+        for note in selected_notes:
+            if not isinstance(note, Mapping):
+                continue
+            note_id = str(note.get("note_id", "")).strip()
+            trust_flags = note.get("trust_flags", [])
+            if isinstance(trust_flags, list) and trust_flags:
+                lines.append(f"- [{note_id}] Treat with caution: {', '.join(str(item) for item in trust_flags)}.")
+                warned = True
+        if not warned:
+            lines.append("- No elevated trust risks in selected notes.")
+
+        lines.extend(
+            [
+                "",
+                "## Suggested agent behavior",
+                f"- Use the selected notes to execute: {task or 'current task'}.",
+                "- Keep claims grounded to cited source notes.",
+            ]
+        )
+        return "\n".join(lines).strip()
 
 
 class AnthropicProvider:
@@ -257,15 +371,75 @@ class AnthropicProvider:
         payload = self._messages_json(model=model, prompt=prompt)
         return validate_classification_payload(payload)
 
-    def integration_verdict(self, **kwargs: object) -> str:
-        del kwargs
-        raise ProviderError("Integration verdicts are out of scope for Phase 01c.")
+    def integration_verdict(
+        self,
+        *,
+        candidate: CandidateNote,
+        classification: ClassificationResult,
+        matches: list[dict[str, Any]],
+        text: str,
+        source_path: Path,
+        model: str,
+    ) -> IntegrationResult:
+        candidate_json = json.dumps(candidate_to_payload(candidate), sort_keys=True)
+        classification_json = json.dumps(
+            {
+                "topic": classification.topic,
+                "knowledge_type": classification.knowledge_type,
+                "confidence": classification.confidence,
+                "reason": classification.reason,
+            },
+            sort_keys=True,
+        )
+        matches_json = json.dumps(matches, sort_keys=True)
+        prompt = (
+            "You are integrating a candidate KB note into an existing artifact. "
+            "Return only JSON with keys verdict, target_note_ids, and rationale. "
+            "Allowed verdict values: identical, adds_nuance, contradicts, unrelated. "
+            "Choose target_note_ids from the provided matches. Return [] when verdict is unrelated.\n\n"
+            f"Source path: {source_path.as_posix()}\n"
+            f"Candidate: {candidate_json}\n"
+            f"Classification: {classification_json}\n"
+            f"Matches: {matches_json}\n\n"
+            f"Document excerpt:\n{text[:6000]}"
+        )
+        payload = self._messages_json(model=model, prompt=prompt)
+        return validate_integration_payload(payload)
 
     def synthesize_context(self, **kwargs: object) -> str:
-        del kwargs
-        raise ProviderError("Context synthesis is out of scope for Phase 01c.")
+        task = str(kwargs.get("task", "")).strip()
+        mode = str(kwargs.get("mode", "coding")).strip() or "coding"
+        budget = int(kwargs.get("budget", 1800))
+        model = str(kwargs.get("model", "")).strip()
+        selected_notes = kwargs.get("selected_notes")
+        if not isinstance(selected_notes, list):
+            selected_notes = []
+
+        prompt = (
+            "Synthesize compact KB context in markdown with exactly these sections:\n"
+            "## Directly relevant techniques\n"
+            "## Applicable heuristics\n"
+            "## Warnings / failure modes\n"
+            "## Suggested agent behavior\n\n"
+            "Ground every claim in the selected notes and cite note IDs in square brackets like [2026-...]. "
+            "Do not invent facts outside selected notes.\n\n"
+            f"Task: {task}\n"
+            f"Mode: {mode}\n"
+            f"Budget tokens: {budget}\n\n"
+            f"Selected notes JSON:\n{json.dumps(selected_notes, sort_keys=True)}"
+        )
+        return self._messages_text(model=model, prompt=prompt).strip()
 
     def _messages_json(self, *, model: str, prompt: str) -> Any:
+        envelope = self._messages_envelope(model=model, prompt=prompt)
+        text = _envelope_text(envelope)
+        return parse_json_response(text)
+
+    def _messages_text(self, *, model: str, prompt: str) -> str:
+        envelope = self._messages_envelope(model=model, prompt=prompt)
+        return _envelope_text(envelope)
+
+    def _messages_envelope(self, *, model: str, prompt: str) -> Any:
         body = json.dumps(
             {
                 "model": model,
@@ -290,17 +464,22 @@ class AnthropicProvider:
             raise ProviderError(f"Anthropic request failed: {exc}") from exc
 
         try:
-            envelope = json.loads(raw)
-            text_parts = [
-                item.get("text", "")
-                for item in envelope.get("content", [])
-                if isinstance(item, Mapping) and item.get("type") == "text"
-            ]
+            return json.loads(raw)
         except (json.JSONDecodeError, AttributeError) as exc:
             raise ProviderError("Anthropic response was not valid Messages API JSON.") from exc
-        if not text_parts:
-            raise ProviderError("Anthropic response did not contain text content.")
-        return parse_json_response("\n".join(text_parts))
+
+
+def _envelope_text(envelope: Any) -> str:
+    if not isinstance(envelope, Mapping):
+        raise ProviderError("Anthropic response was not a JSON object.")
+    text_parts = [
+        item.get("text", "")
+        for item in envelope.get("content", [])
+        if isinstance(item, Mapping) and item.get("type") == "text"
+    ]
+    if not text_parts:
+        raise ProviderError("Anthropic response did not contain text content.")
+    return "\n".join(str(part) for part in text_parts if str(part).strip())
 
 
 def parse_json_response(text: str) -> Any:
@@ -366,6 +545,23 @@ def validate_classification_payload(payload: Any) -> ClassificationResult:
         knowledge_type=knowledge_type,
         confidence=confidence,
         reason=reason,
+    )
+
+
+def validate_integration_payload(payload: Any) -> IntegrationResult:
+    if not isinstance(payload, Mapping):
+        raise ProviderError("Integration response must be a JSON object.")
+    verdict = _required_enum(payload, "verdict", INTEGRATION_VERDICTS)
+    target_note_ids = _required_string_list(payload, "target_note_ids")
+    rationale = _optional_string(payload, "rationale") or ""
+    if verdict == "unrelated" and target_note_ids:
+        raise ProviderError("Integration response with verdict unrelated must not include target_note_ids.")
+    if verdict != "unrelated" and not target_note_ids:
+        raise ProviderError(f"Integration response with verdict {verdict!r} requires at least one target note ID.")
+    return IntegrationResult(
+        verdict=verdict,
+        target_note_ids=target_note_ids,
+        rationale=rationale,
     )
 
 

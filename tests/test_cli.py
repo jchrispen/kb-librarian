@@ -121,6 +121,7 @@ def test_kb_ingest_mock_provider_smoke(tmp_path):
     config["providers"]["mock"] = {}
     config["operations"]["extract"] = {"provider": "mock", "model": "mock-extract"}
     config["operations"]["classify"] = {"provider": "mock", "model": "mock-classify"}
+    config["operations"]["integrate"] = {"provider": "mock", "model": "mock-integrate"}
     write_config_file(tmp_path / ".kb" / "config.yaml", config)
 
     source = tmp_path / "raw" / "agent-context.md"
@@ -139,6 +140,70 @@ def test_kb_ingest_mock_provider_smoke(tmp_path):
     assert list((tmp_path / "topics" / "agent-systems").glob("*.md"))
 
 
+def test_kb_context_mock_provider_smoke(tmp_path):
+    init_result = run_cli("init", "--data-dir", str(tmp_path))
+    assert init_result.returncode == 0
+
+    config = default_config(tmp_path)
+    config["providers"]["mock"] = {}
+    config["operations"]["synthesize"] = {"provider": "mock", "model": "mock-synthesize"}
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    seed = tmp_path / "seed.md"
+    seed.write_text(
+        "# Agent retrieval heuristic\n\nPrefer compact context and cite source note IDs.\n",
+        encoding="utf-8",
+    )
+
+    add_result = run_cli(
+        "add",
+        "--data-dir",
+        str(tmp_path),
+        "--topic",
+        "agent-systems",
+        "--type",
+        "heuristic",
+        "--from-file",
+        str(seed),
+    )
+    assert add_result.returncode == 0
+    match = NOTE_ID_PATTERN.search(add_result.stdout)
+    assert match is not None
+    note_id = match.group(1)
+
+    result = run_cli(
+        "context",
+        "agent retrieval context",
+        "--mode",
+        "coding",
+        "--budget",
+        "900",
+        "--data-dir",
+        str(tmp_path),
+    )
+    assert result.returncode == 0
+    assert "# KB Context" in result.stdout
+    assert "## Source notes" in result.stdout
+    assert note_id in result.stdout
+    assert "confidence:" in result.stdout
+    assert "status:" in result.stdout
+
+    json_result = run_cli(
+        "context",
+        "agent retrieval context",
+        "--mode",
+        "coding",
+        "--budget",
+        "900",
+        "--json",
+        "--data-dir",
+        str(tmp_path),
+    )
+    assert json_result.returncode == 0
+    assert "\"selected_notes\":" in json_result.stdout
+    assert "\"citations\":" in json_result.stdout
+
+
 def test_kb_get_missing_id_returns_clear_error(tmp_path):
     run_cli("init", "--data-dir", str(tmp_path))
     result = run_cli("get", "2026-01-01-missing", "--data-dir", str(tmp_path))
@@ -147,8 +212,65 @@ def test_kb_get_missing_id_returns_clear_error(tmp_path):
     assert "was not found" in result.stderr
 
 
-def test_placeholder_command_returns_nonzero_with_clear_error():
-    result = run_cli("context", "agent context task")
+def test_kb_review_lists_bounded_items(tmp_path):
+    init_result = run_cli("init", "--data-dir", str(tmp_path))
+    assert init_result.returncode == 0
+
+    (tmp_path / "review" / "pending-classification.md").write_text(
+        "# Pending Classification\n\n"
+        "## item: classification-a\n\n"
+        "Reason: low confidence\n\n"
+        "- title: Candidate A\n\n"
+        "## item: classification-b\n\n"
+        "Reason: unknown topic\n\n"
+        "- title: Candidate B\n\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "review" / "pending-merge.md").write_text(
+        "# Pending Merge\n\n"
+        "## item: merge-a\n\n"
+        "- candidate_title: Merge Candidate\n\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "review" / "disputes.md").write_text(
+        "# Disputes\n\n"
+        "## item: dispute-a\n\n"
+        "- candidate_title: Disputed Candidate\n\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".kb" / "ingested.json").write_text(
+        "[\n"
+        "  {\n"
+        "    \"hash\": \"abc\",\n"
+        "    \"source_name\": \"dup.md\",\n"
+        "    \"status\": \"duplicate\",\n"
+        "    \"processed_at\": \"2026-05-05T09:00:00\"\n"
+        "  }\n"
+        "]\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".kb" / "errors.log").write_text(
+        "2026-05-05T09:00:01 Unsupported ingest file extension for /tmp/example.pdf\n",
+        encoding="utf-8",
+    )
+    config = default_config(tmp_path)
+    config["review"]["max_review_items_per_run"] = 3
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    result = run_cli("review", "--data-dir", str(tmp_path))
+    list_result = run_cli("review", "list", "--data-dir", str(tmp_path))
+
+    assert result.returncode == 0
+    assert "Review items: 6" in result.stdout
+    assert "Showing up to 3 items:" in result.stdout
+    assert result.stdout.count("\n- [") == 3
+    assert list_result.returncode == 0
+    assert list_result.stdout == result.stdout
+
+
+def test_kb_context_requires_positive_budget(tmp_path):
+    run_cli("init", "--data-dir", str(tmp_path))
+    result = run_cli("context", "agent context task", "--budget", "0", "--data-dir", str(tmp_path))
 
     assert result.returncode == 1
-    assert "kb context is not implemented in Phase 01c" in result.stderr
+    assert "Context budget must be a positive integer." in result.stderr
