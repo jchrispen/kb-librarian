@@ -1,5 +1,8 @@
 # Phase 04a - Ingest Locking and Atomic Recovery
 
+Status: Complete
+Completed: 2026-05-07
+
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
 ## Goal
@@ -74,6 +77,45 @@ Make ingest safe under interruption and concurrent use. At the end of this miles
 - Interrupted ingest can resume without duplicating notes, review items, or raw-file archiving.
 - Partial failures do not replace known-good generated indexes.
 - User-facing recovery guidance is explicit and actionable.
+
+## Completion Record
+
+Completed on 2026-05-07.
+
+Implemented files:
+
+- `src/kb_librarian/atomic.py`
+- `src/kb_librarian/ingest_recovery.py`
+- `src/kb_librarian/ingest.py`
+- `src/kb_librarian/cli.py`
+- `src/kb_librarian/doctor.py`
+- `src/kb_librarian/notes.py`
+- `src/kb_librarian/storage.py`
+- `src/kb_librarian/review.py`
+- `src/kb_librarian/indexing.py`
+- `src/kb_librarian/search_index.py`
+- `tests/test_ingest_recovery.py`
+- `tests/test_ingest.py`
+- `tests/test_doctor.py`
+- `tests/test_cli.py`
+- `README.md`
+- `docs/commands.md`
+- `docs/user-guide.md`
+- `docs/troubleshooting.md`
+
+Verification:
+
+- `python3 -m pytest tests/test_ingest_recovery.py tests/test_ingest.py tests/test_doctor.py tests/test_cli.py -q` - passed, 42 tests.
+- `python3 -m pytest -q` - passed, 117 tests.
+
+Behavior delivered:
+
+- `kb ingest` now creates `.kb/ingest.lock`, refuses active concurrent ingests, detects stale locks, and supports `--resume`.
+- Ingest progress is checkpointed in `.kb/state.json` with operation IDs, current file/hash, candidate IDs, integration decisions, written files, archive target, and last completed stage.
+- Resume replays idempotently across note creation, source appends, review items, ingest records, and raw archiving.
+- Note, review, JSON state, markdown index, and lexical index writes use atomic replacement; failed SQLite rebuilds preserve the previous good index.
+- `kb doctor` reports active/stale ingest locks and interrupted checkpoints under a Recovery subsystem.
+- Ingest reports and error logs include operation IDs and recovery guidance.
 
 ## Out of Scope
 

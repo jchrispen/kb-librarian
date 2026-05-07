@@ -12,17 +12,17 @@ Phase 4 assumes Phases 1-3 are complete.
 
 | Milestone | Status | Notes |
 |---|---|---|
-| [04a - Ingest Locking and Atomic Recovery](04a-ingest-locking-and-atomic-recovery.md) | Next | Adds ingest lockfiles, resumable checkpoints, atomic writes, and recovery diagnostics. |
-| [04b - Provider Retry and Golden Corpus Harness](04b-provider-retry-and-golden-corpus-harness.md) | Pending | Adds transient retry/backoff behavior and deterministic regression checks. |
+| [04a - Ingest Locking and Atomic Recovery](04a-ingest-locking-and-atomic-recovery.md) | Complete | Added ingest lockfiles, resumable checkpoints, atomic writes, doctor recovery diagnostics, and tests. |
+| [04b - Provider Retry and Golden Corpus Harness](04b-provider-retry-and-golden-corpus-harness.md) | Next | Adds transient retry/backoff behavior and deterministic regression checks. |
 | [04c - PDF and HTML Ingest Parsing](04c-pdf-and-html-ingest-parsing.md) | Pending | Adds local PDF and HTML parsing with clean failure handling and source metadata. |
 | [04d - Hook and Scheduler Templates](04d-hook-and-scheduler-templates.md) | Pending | Adds optional session-start and scheduled-run templates without installing automation by default. |
 | [04e - Optional Auto-Commit and Final Diagnostics](04e-optional-auto-commit-and-final-diagnostics.md) | Pending | Adds guarded auto-commit policy and phase-level diagnostic polish across recovery flows. |
 
 ## Milestone Order
 
-1. [04a - Ingest Locking and Atomic Recovery](04a-ingest-locking-and-atomic-recovery.md) - next
+1. [04a - Ingest Locking and Atomic Recovery](04a-ingest-locking-and-atomic-recovery.md) - complete
    - Prevents concurrent ingest corruption and makes interrupted operations recoverable.
-2. [04b - Provider Retry and Golden Corpus Harness](04b-provider-retry-and-golden-corpus-harness.md) - pending
+2. [04b - Provider Retry and Golden Corpus Harness](04b-provider-retry-and-golden-corpus-harness.md) - next
    - Adds transient-failure resilience and regression checks around core extraction and retrieval behavior.
 3. [04c - PDF and HTML Ingest Parsing](04c-pdf-and-html-ingest-parsing.md) - pending
    - Extends local ingest coverage to richer source formats while preserving inspectable failure modes.
