@@ -164,6 +164,7 @@ For offline development or tests, the codebase also supports a deterministic `mo
 ## Documentation
 
 - [User Guide](docs/user-guide.md)
+- [Codex KB Demo Guide](docs/codex-kb-demo.md)
 - [Configuration Reference](docs/configuration.md)
 - [Command Reference](docs/commands.md)
 - [Troubleshooting](docs/troubleshooting.md)
