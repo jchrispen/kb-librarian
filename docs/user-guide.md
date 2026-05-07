@@ -51,12 +51,15 @@ This creates:
 - `review/` for human review queues
 - `.kb/` for config, generated state, and append-only logs
 
+By default, `kb init` creates the library at `~/.kb/.library` and writes the default config at `~/.kb/config.yaml`.
+When you pass `--data-dir`, the selected library keeps its config and state under its own `.kb/` directory.
+
 If you omit `--data-dir`, KB Librarian resolves the data directory in this order:
 
 1. `--data-dir`
 2. `KB_DATA_DIR`
-3. `data_dir` stored in `<default-data-dir>/.kb/config.yaml`
-4. current directory (`.`)
+3. `data_dir` stored in `~/.kb/config.yaml`
+4. `~/.kb/.library`
 
 ## Create Notes Directly
 

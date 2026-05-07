@@ -36,7 +36,7 @@ Each milestone should leave the CLI runnable and covered by focused tests. Later
 ## Phase Deliverables
 
 - Python package scaffold with a console-script entry point named `kb`.
-- Config loading with default data directory support for current directory (`.`).
+- Config loading with default data directory support for `~/.kb/.library`.
 - Local KB data directory initialization matching the spec's published-artifact layout.
 - Markdown note model with YAML frontmatter parsing, validation, deterministic ID generation, and note body templates.
 - Disposable local lexical index using SQLite FTS5 or an equivalent local index.

@@ -37,6 +37,33 @@ def test_initialize_data_dir_creates_phase_1_layout(tmp_path):
     assert ingested == []
 
 
+def test_initialize_default_data_dir_writes_config_next_to_library(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    library_dir = tmp_path / ".kb" / ".library"
+
+    created = initialize_data_dir(library_dir)
+
+    assert (tmp_path / ".kb" / ".library").is_dir()
+    assert (tmp_path / ".kb" / "config.yaml") in created
+    assert (tmp_path / ".kb" / "config.yaml").is_file()
+    assert not (tmp_path / ".kb" / ".library" / ".kb" / "config.yaml").exists()
+    config = yaml.safe_load((tmp_path / ".kb" / "config.yaml").read_text(encoding="utf-8"))
+    assert config["data_dir"] == str(library_dir)
+
+
+def test_initialize_default_control_dir_redirects_to_library(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    created = initialize_data_dir(tmp_path / ".kb")
+
+    assert (tmp_path / ".kb" / ".library" / "INDEX.md").is_file()
+    assert (tmp_path / ".kb" / ".library" / "topics").is_dir()
+    assert not (tmp_path / ".kb" / "INDEX.md").exists()
+    config = yaml.safe_load((tmp_path / ".kb" / "config.yaml").read_text(encoding="utf-8"))
+    assert config["data_dir"] == str(tmp_path / ".kb" / ".library")
+    assert tmp_path / ".kb" / "config.yaml" in created
+
+
 def test_initialize_data_dir_is_idempotent_and_preserves_user_files(tmp_path):
     initialize_data_dir(tmp_path)
     config_path = tmp_path / ".kb" / "config.yaml"

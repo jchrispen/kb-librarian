@@ -39,6 +39,27 @@ def run_cli(
     )
 
 
+def run_cli_in(
+    cwd: Path,
+    *args: str,
+    env: dict[str, str] | None = None,
+    input_text: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    merged_env = os.environ.copy()
+    merged_env["PYTHONPATH"] = str(SRC)
+    if env:
+        merged_env.update(env)
+    return subprocess.run(
+        [sys.executable, "-m", "kb_librarian.cli", *args],
+        cwd=cwd,
+        env=merged_env,
+        input=input_text,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
 def run_git(cwd: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=cwd, text=True, capture_output=True, check=True)
 
@@ -104,6 +125,19 @@ def test_kb_init_smoke_and_idempotency(tmp_path):
     assert (tmp_path / ".kb" / "usage.log").is_file()
     assert (tmp_path / ".kb" / "search-misses.log").is_file()
     assert (tmp_path / "review" / "pending-merge.md").is_file()
+    assert second.returncode == 0
+    assert "Already initialized" in second.stdout
+
+
+def test_kb_init_default_uses_library_next_to_default_config(tmp_path):
+    first = run_cli_in(tmp_path, "init", env={"HOME": str(tmp_path)})
+    second = run_cli_in(tmp_path, "init", env={"HOME": str(tmp_path)})
+
+    assert first.returncode == 0
+    assert f"Initialized KB at {tmp_path / '.kb' / '.library'}" in first.stdout
+    assert (tmp_path / ".kb" / "config.yaml").is_file()
+    assert (tmp_path / ".kb" / ".library" / ".kb" / "usage.log").is_file()
+    assert not (tmp_path / ".kb" / ".library" / ".kb" / "config.yaml").exists()
     assert second.returncode == 0
     assert "Already initialized" in second.stdout
 

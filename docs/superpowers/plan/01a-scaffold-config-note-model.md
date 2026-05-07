@@ -51,7 +51,7 @@ Create a bootable Python CLI and local KB file model. At the end of this milesto
    - All commands must support `--help`.
 
 3. Implement config resolution.
-   - Resolve `data_dir` in this order: explicit `--data-dir`, `KB_DATA_DIR`, configured value from `<data-dir>/.kb/config.yaml`, then current directory (`.`).
+   - Resolve `data_dir` in this order: explicit `--data-dir`, `KB_DATA_DIR`, configured value from `~/.kb/config.yaml`, then `~/.kb/.library`.
    - Load and write YAML config.
    - Include phase-1 config sections from the spec: `providers`, `operations`, `retrieval`, `ingest`, `indexes`, `review`, `git`, `privacy`, and `hooks`.
    - Validate required config keys and produce actionable errors for malformed config.

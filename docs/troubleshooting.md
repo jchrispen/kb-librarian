@@ -125,7 +125,7 @@ The resolution order is:
 
 1. `--data-dir`
 2. `KB_DATA_DIR`
-3. configured `data_dir`
-4. current directory (`.`)
+3. configured `data_dir` from `~/.kb/config.yaml`
+4. `~/.kb/.library`
 
 Use `--data-dir` explicitly if you want to remove ambiguity.

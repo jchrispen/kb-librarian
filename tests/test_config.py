@@ -13,7 +13,7 @@ from kb_librarian.config import (
     validate_config,
     write_config_file,
 )
-from kb_librarian.paths import DEFAULT_DATA_DIR
+from kb_librarian.paths import DEFAULT_DATA_DIR, default_config_path, default_data_dir
 
 
 def test_default_config_contains_phase_1_sections(tmp_path):
@@ -41,10 +41,12 @@ def test_default_config_contains_phase_1_sections(tmp_path):
     assert "session_start_ingest: false" in rendered
 
 
-def test_default_data_dir_is_current_directory():
-    assert DEFAULT_DATA_DIR == Path(".")
-    assert default_config()["data_dir"] == "."
-    assert resolve_data_dir(env={}) == Path(".")
+def test_default_data_dir_is_library_next_to_default_config():
+    assert DEFAULT_DATA_DIR == Path(".kb") / ".library"
+    assert default_config()["data_dir"] == str(Path.home() / ".kb" / ".library")
+    assert default_config_path() == Path.home() / ".kb" / "config.yaml"
+    assert default_data_dir() == Path.home() / ".kb" / ".library"
+    assert resolve_data_dir(env={}) == Path.home() / ".kb" / ".library"
 
 
 def test_resolve_data_dir_precedence(tmp_path):
@@ -57,7 +59,28 @@ def test_resolve_data_dir_precedence(tmp_path):
     assert resolve_data_dir(explicit_dir, env={"KB_DATA_DIR": str(env_dir)}, default_data_dir=default_dir) == explicit_dir
     assert resolve_data_dir(env={"KB_DATA_DIR": str(env_dir)}, default_data_dir=default_dir) == env_dir
     assert resolve_data_dir(env={}, default_data_dir=default_dir) == configured_dir
-    assert resolve_data_dir(env={}, default_data_dir=tmp_path / "missing-default") == tmp_path / "missing-default"
+    assert resolve_data_dir(env={}, default_data_dir=tmp_path / "missing-default") == (
+        tmp_path / "missing-default" / ".kb" / ".library"
+    )
+
+
+def test_default_control_dir_resolves_to_default_library(tmp_path):
+    assert resolve_data_dir(tmp_path / ".kb", env={}, default_data_dir=tmp_path) == (
+        tmp_path / ".kb" / ".library"
+    )
+    assert resolve_data_dir(env={"KB_DATA_DIR": str(tmp_path / ".kb")}, default_data_dir=tmp_path) == (
+        tmp_path / ".kb" / ".library"
+    )
+
+    write_config_file(tmp_path / ".kb" / "config.yaml", default_config(tmp_path / ".kb"))
+
+    assert resolve_data_dir(env={}, default_data_dir=tmp_path) == tmp_path / ".kb" / ".library"
+
+
+def test_home_control_dir_env_resolves_to_home_library(tmp_path):
+    home_control_dir = tmp_path / ".kb"
+
+    assert resolve_data_dir(env={"KB_DATA_DIR": str(home_control_dir)}) == home_control_dir / ".library"
 
 
 def test_load_config_env_override_wins_over_config_value(tmp_path):
@@ -69,6 +92,15 @@ def test_load_config_env_override_wins_over_config_value(tmp_path):
     loaded = load_config(env={"KB_DATA_DIR": str(env_dir)}, default_data_dir=tmp_path / "default")
 
     assert loaded["data_dir"] == str(env_dir)
+
+
+def test_load_config_uses_default_config_next_to_default_library(tmp_path):
+    configured_dir = tmp_path / ".kb" / ".library"
+    write_config_file(tmp_path / ".kb" / "config.yaml", default_config(configured_dir))
+
+    loaded = load_config(env={}, default_data_dir=tmp_path)
+
+    assert loaded["data_dir"] == str(configured_dir)
 
 
 def test_validate_config_reports_missing_required_key(tmp_path):

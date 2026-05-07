@@ -15,6 +15,8 @@ from kb_librarian.paths import (
     ROOT_FILES,
     STATE_FILES,
     config_path,
+    is_control_dir,
+    is_library_dir_next_to_control_dir,
 )
 from kb_librarian.review import ensure_review_state
 
@@ -108,6 +110,8 @@ def initialize_data_dir(data_dir: str | Path, *, hooks: bool = False) -> list[Pa
     """Create the Phase 1 KB directory layout without overwriting user files."""
 
     root = Path(data_dir).expanduser()
+    if is_control_dir(root):
+        root = root / ".library"
     created: list[Path] = []
     root.mkdir(parents=True, exist_ok=True)
 
@@ -141,7 +145,7 @@ def initialize_data_dir(data_dir: str | Path, *, hooks: bool = False) -> list[Pa
         ensure_review_state(root, render=False)
         created.append(review_state)
 
-    config_file = config_path(root)
+    config_file = _config_path_for_initialized_dir(root)
     if not config_file.exists():
         write_config_file(config_file, default_config(root, hooks=hooks))
         created.append(config_file)
@@ -162,6 +166,12 @@ def initialize_data_dir(data_dir: str | Path, *, hooks: bool = False) -> list[Pa
         created.extend(_write_hook_templates(root))
 
     return created
+
+
+def _config_path_for_initialized_dir(data_dir: Path) -> Path:
+    if is_library_dir_next_to_control_dir(data_dir):
+        return data_dir.parent / "config.yaml"
+    return config_path(data_dir)
 
 
 def render_preamble(data_dir: str | Path) -> str:

@@ -392,7 +392,7 @@ def _handle_init(args: argparse.Namespace) -> int:
 def _handle_ingest(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
-    config = load_config(data_dir)
+    config = load_config(args.data_dir)
     auto_before = _capture_auto_commit_before(data_dir, config)
     report = ingest(
         data_dir,
@@ -433,7 +433,7 @@ def _handle_ingest(args: argparse.Namespace) -> int:
 def _handle_review(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
-    config = load_config(data_dir)
+    config = load_config(args.data_dir)
     action = str(args.action or "list")
 
     if action in {"list"}:
@@ -492,7 +492,7 @@ def _handle_review(args: argparse.Namespace) -> int:
 def _handle_context(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
-    config = load_config(data_dir)
+    config = load_config(args.data_dir)
 
     mode = str(args.mode or "coding")
     if mode not in CONTEXT_MODES:
@@ -581,7 +581,7 @@ def _handle_context(args: argparse.Namespace) -> int:
 def _handle_explore(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
-    config = load_config(data_dir)
+    config = load_config(args.data_dir)
 
     budget = args.budget if args.budget is not None else int(config["retrieval"]["explore_budget_tokens"])
     if budget <= 0:
@@ -662,7 +662,7 @@ def _handle_explore(args: argparse.Namespace) -> int:
 def _handle_add(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
-    config = load_config(data_dir)
+    config = load_config(args.data_dir)
     auto_before = _capture_auto_commit_before(data_dir, config)
     source_text, source_name = _read_add_input(args.from_file)
     parsed_seed = _try_parse_seed_note(source_text)
@@ -727,7 +727,7 @@ def _handle_add(args: argparse.Namespace) -> int:
 def _handle_reindex(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
-    config = load_config(data_dir)
+    config = load_config(args.data_dir)
     auto_before = _capture_auto_commit_before(data_dir, config)
     run_maintenance_scan = bool(args.scan_clusters or args.all)
     result = reindex_data_dir(data_dir, config=config, scan_clusters=run_maintenance_scan)
@@ -802,7 +802,7 @@ def _ingest_related_before_paths(file_arg: str | None) -> list[Path]:
 def _handle_compact(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
-    config = load_config(data_dir)
+    config = load_config(args.data_dir)
     auto_before = _capture_auto_commit_before(data_dir, config)
     result = draft_compaction_proposal(data_dir, config=config, target=str(args.target))
     auto_result = maybe_auto_commit(
@@ -837,7 +837,7 @@ def _handle_compact(args: argparse.Namespace) -> int:
 def _handle_search(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
-    config = load_config(data_dir)
+    config = load_config(args.data_dir)
     fts_path = data_dir / ".kb" / "fts.sqlite"
     if not fts_path.exists():
         reindex_data_dir(data_dir)
@@ -983,7 +983,7 @@ def _handle_topics(args: argparse.Namespace) -> int:
 def _handle_topic_rename(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
-    config = load_config(data_dir)
+    config = load_config(args.data_dir)
     auto_before = _capture_auto_commit_before(data_dir, config)
     result = rename_topic(
         data_dir,
@@ -1006,7 +1006,7 @@ def _handle_topic_rename(args: argparse.Namespace) -> int:
 def _handle_topic_promote(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
-    config = load_config(data_dir)
+    config = load_config(args.data_dir)
     auto_before = _capture_auto_commit_before(data_dir, config)
     result = promote_topics(
         data_dir,
@@ -1029,7 +1029,7 @@ def _handle_topic_promote(args: argparse.Namespace) -> int:
 def _handle_topic_split(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
-    config = load_config(data_dir)
+    config = load_config(args.data_dir)
     auto_before = _capture_auto_commit_before(data_dir, config)
     result = queue_topic_split_proposal(
         data_dir,
@@ -1054,7 +1054,7 @@ def _handle_topic_split(args: argparse.Namespace) -> int:
 def _handle_topic_merge(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
-    config = load_config(data_dir)
+    config = load_config(args.data_dir)
     auto_before = _capture_auto_commit_before(data_dir, config)
     result = queue_topic_merge_proposal(
         data_dir,

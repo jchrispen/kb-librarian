@@ -3,7 +3,7 @@
 **Date:** 2026-05-04  
 **Status:** Revised design direction; ready for MVP implementation planning  
 **Tool repo:** `/mnt/c/workspace/source/internal/kb-librarian/`  
-**Default data repo:** current working directory (`.`)  
+**Default data repo:** `~/.kb/.library`, next to the default config at `~/.kb/config.yaml`  
 **Design thesis:** Agent-accessible knowledge artifact, published as files, inspectable by humans when needed.
 
 ---
@@ -70,6 +70,9 @@ KB Librarian has three layers:
 Agents should usually interact with layer 3. Humans inspect and correct layer 1. Layer 2 accelerates retrieval but is not the source of truth.
 
 ### 2.2 Directory layout
+
+The default library is stored at `~/.kb/.library`, while the default config lives one level up at `~/.kb/config.yaml`.
+Explicit libraries selected with `--data-dir` keep their config under the library's own `.kb/` directory.
 
 ```text
 kb/                                          # data repo (git)
@@ -489,7 +492,7 @@ Returns summaries by default, not full bodies.
 ### 4.7 Configuration
 
 ```yaml
-data_dir: .
+data_dir: ~/.kb/.library
 
 providers:
   anthropic:

@@ -105,7 +105,8 @@ kb context "review this architecture" --mode architecture --data-dir /path/to/kb
 
 ## Data Directory Layout
 
-By default, KB Librarian uses the current directory (`.`) unless you pass `--data-dir` or set `KB_DATA_DIR`.
+By default, KB Librarian stores its library at `~/.kb/.library` with config at `~/.kb/config.yaml`.
+Pass `--data-dir` or set `KB_DATA_DIR` to use a different library.
 
 A KB data directory contains:
 

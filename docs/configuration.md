@@ -5,10 +5,11 @@
 KB Librarian stores its config at:
 
 ```text
-<data-dir>/.kb/config.yaml
+~/.kb/config.yaml
 ```
 
-The file is created by `kb init`.
+The default config is created by `kb init` and points at the default library in `~/.kb/.library`.
+When you pass `--data-dir` or set `KB_DATA_DIR`, that explicit library uses its own config at `<data-dir>/.kb/config.yaml`.
 
 ## Data Directory Resolution
 
@@ -16,8 +17,8 @@ The CLI resolves the KB data directory in this order:
 
 1. `--data-dir`
 2. `KB_DATA_DIR`
-3. configured `data_dir` from `<default-data-dir>/.kb/config.yaml`
-4. current directory (`.`)
+3. configured `data_dir` from `~/.kb/config.yaml`
+4. `~/.kb/.library`
 
 ## Default Config Shape
 
@@ -37,7 +38,7 @@ The generated config includes these sections:
 ## Example
 
 ```yaml
-data_dir: .
+data_dir: ~/.kb/.library
 
 providers:
   anthropic:

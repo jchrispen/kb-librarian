@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-DEFAULT_DATA_DIR = Path(".")
+DEFAULT_ROOT = Path.home()
+
+DEFAULT_DATA_DIR = Path(".kb") / ".library"
 
 KB_DIR_NAME = ".kb"
 
@@ -47,3 +49,28 @@ def config_path(data_dir: Path) -> Path:
     """Return the path to the YAML config for a data directory."""
 
     return data_dir / KB_DIR_NAME / "config.yaml"
+
+
+def default_data_dir(default_root: str | Path = DEFAULT_ROOT) -> Path:
+    """Return the default library directory under the default config root."""
+
+    return Path(default_root).expanduser() / DEFAULT_DATA_DIR
+
+
+def default_config_path(default_root: str | Path = DEFAULT_ROOT) -> Path:
+    """Return the default config file path outside the default library."""
+
+    return Path(default_root).expanduser() / KB_DIR_NAME / "config.yaml"
+
+
+def is_control_dir(path: str | Path) -> bool:
+    """Return true when a path is a .kb control directory."""
+
+    return Path(path).expanduser().name == KB_DIR_NAME
+
+
+def is_library_dir_next_to_control_dir(path: str | Path) -> bool:
+    """Return true when a path is a .library directory under a .kb control directory."""
+
+    candidate = Path(path).expanduser()
+    return candidate.name == ".library" and candidate.parent.name == KB_DIR_NAME

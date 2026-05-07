@@ -10,7 +10,14 @@ from typing import Any, Mapping
 import yaml
 
 from kb_librarian.errors import ConfigError
-from kb_librarian.paths import DEFAULT_DATA_DIR, config_path
+from kb_librarian.paths import (
+    DEFAULT_ROOT,
+    config_path,
+    default_config_path,
+    default_data_dir as default_library_dir,
+    is_control_dir,
+    is_library_dir_next_to_control_dir,
+)
 
 REQUIRED_TOP_LEVEL_KEYS = (
     "data_dir",
@@ -60,8 +67,11 @@ REQUIRED_SECTION_KEYS = {
 }
 
 
-def default_config(data_dir: str | Path = DEFAULT_DATA_DIR, *, hooks: bool = False) -> dict[str, Any]:
+def default_config(data_dir: str | Path | None = None, *, hooks: bool = False) -> dict[str, Any]:
     """Return a fresh Phase 1 config dictionary."""
+
+    if data_dir is None:
+        data_dir = default_library_dir()
 
     return {
         "data_dir": str(Path(data_dir).expanduser()),
@@ -175,34 +185,41 @@ def resolve_data_dir(
     explicit_data_dir: str | Path | None = None,
     *,
     env: Mapping[str, str] | None = None,
-    default_data_dir: str | Path = DEFAULT_DATA_DIR,
+    default_data_dir: str | Path = DEFAULT_ROOT,
 ) -> Path:
     """Resolve the KB data directory using the Phase 1 precedence rules."""
 
     if explicit_data_dir:
-        return Path(explicit_data_dir).expanduser()
+        return _normalize_resolved_data_dir(explicit_data_dir, default_data_dir)
 
     environ = os.environ if env is None else env
     env_data_dir = environ.get("KB_DATA_DIR")
     if env_data_dir:
-        return Path(env_data_dir).expanduser()
+        return _normalize_resolved_data_dir(env_data_dir, default_data_dir)
 
-    default_dir = Path(default_data_dir).expanduser()
-    configured_path = config_path(default_dir)
+    default_root = Path(default_data_dir).expanduser()
+    configured_path = default_config_path(default_root)
     if configured_path.exists():
         config = read_config_file(configured_path)
         configured_data_dir = config.get("data_dir")
         if configured_data_dir:
-            return Path(str(configured_data_dir)).expanduser()
+            return _normalize_resolved_data_dir(str(configured_data_dir), default_data_dir)
 
-    return default_dir
+    return default_library_dir(default_root)
+
+
+def _normalize_resolved_data_dir(data_dir: str | Path, default_root: str | Path = DEFAULT_ROOT) -> Path:
+    path = Path(data_dir).expanduser()
+    if is_control_dir(path):
+        return path / ".library"
+    return path
 
 
 def load_config(
     explicit_data_dir: str | Path | None = None,
     *,
     env: Mapping[str, str] | None = None,
-    default_data_dir: str | Path = DEFAULT_DATA_DIR,
+    default_data_dir: str | Path = DEFAULT_ROOT,
 ) -> dict[str, Any]:
     """Load config for the resolved data directory, falling back to defaults."""
 
@@ -211,7 +228,7 @@ def load_config(
         env=env,
         default_data_dir=default_data_dir,
     )
-    path = config_path(data_dir)
+    path = data_dir.parent / "config.yaml" if is_library_dir_next_to_control_dir(data_dir) else config_path(data_dir)
     if path.exists():
         config = read_config_file(path)
     else:
