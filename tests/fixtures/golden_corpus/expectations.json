@@ -1,0 +1,23 @@
+{
+  "expected_note_count": 3,
+  "expected_knowledge_types": {
+    "2026-05-07-agent-context-retrieval-pattern": "pattern",
+    "2026-05-07-token-budget-decision-for-context": "decision",
+    "2026-05-07-heuristic-for-citation-grounding": "heuristic"
+  },
+  "expected_title_phrases": {
+    "2026-05-07-agent-context-retrieval-pattern": "agent context retrieval pattern",
+    "2026-05-07-token-budget-decision-for-context": "token budget decision for context",
+    "2026-05-07-heuristic-for-citation-grounding": "heuristic for citation grounding"
+  },
+  "search_expectations": [
+    {
+      "query": "token budget decision context",
+      "top_note_id": "2026-05-07-token-budget-decision-for-context"
+    },
+    {
+      "query": "citation grounding heuristic",
+      "top_note_id": "2026-05-07-heuristic-for-citation-grounding"
+    }
+  ]
+}

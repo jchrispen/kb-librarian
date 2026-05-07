@@ -42,6 +42,11 @@ data_dir: /mnt/c/workspace/source/internal/kb
 providers:
   anthropic:
     api_key_env: ANTHROPIC_API_KEY
+  retry:
+    max_attempts: 3
+    base_delay_seconds: 0.25
+    max_delay_seconds: 2.0
+    jitter_seconds: 0.1
 
 operations:
   extract:    { provider: anthropic, model: claude-sonnet-4-6 }
@@ -105,6 +110,15 @@ export ANTHROPIC_API_KEY=your_key_here
 ```
 
 If the key is missing, provider-backed commands fail with an explicit error.
+
+`providers.retry` controls bounded retry/backoff behavior for provider-backed operations:
+
+- `max_attempts`: maximum total attempts per provider call (including the first attempt)
+- `base_delay_seconds`: initial backoff delay before retry 2
+- `max_delay_seconds`: upper bound for exponential backoff delay
+- `jitter_seconds`: random jitter added to each retry delay
+
+Transient failures (for example timeouts, rate limits, and provider 5xx responses) are retried. Non-transient schema/validation failures stop without retry.
 
 ## Offline Mock Provider
 

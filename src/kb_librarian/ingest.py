@@ -22,6 +22,8 @@ from kb_librarian.ingest_recovery import (
     resumable_ingest_checkpoint,
 )
 from kb_librarian.notes import Note, generate_note_id, read_note, write_note
+from kb_librarian.parsers import parse_html, parse_pdf
+from kb_librarian.provider_retry import RetryEvent, call_with_retry, retry_policy_from_config
 from kb_librarian.providers import (
     CandidateNote,
     ClassificationResult,
@@ -29,7 +31,12 @@ from kb_librarian.providers import (
     operation_route,
     provider_from_config,
 )
-from kb_librarian.review import add_review_item, queue_duplicate_review_item, queue_unsupported_file_review_item
+from kb_librarian.review import (
+    add_review_item,
+    queue_duplicate_review_item,
+    queue_parser_failure_review_item,
+    queue_unsupported_file_review_item,
+)
 from kb_librarian.search_index import query_candidates, score_document, tokenize_query
 from kb_librarian.storage import (
     NOTE_ID_REFERENCE_PATTERN,
@@ -43,7 +50,7 @@ from kb_librarian.storage import (
 )
 
 
-SUPPORTED_SUFFIXES = {".md", ".txt"}
+SUPPORTED_SUFFIXES = {".md", ".txt", ".pdf", ".html", ".htm"}
 MATCH_CAP = 12
 
 
@@ -52,6 +59,7 @@ class ParsedInput:
     path: Path
     text: str
     digest: str
+    source_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -67,6 +75,7 @@ class IngestReport:
     classification_items: list[str] = field(default_factory=list)
     duplicate_items: list[str] = field(default_factory=list)
     unsupported_file_items: list[str] = field(default_factory=list)
+    parser_failure_items: list[str] = field(default_factory=list)
     review_paths: list[Path] = field(default_factory=list)
     skipped_candidates: int = 0
     duplicates: int = 0
@@ -174,6 +183,11 @@ def ingest(
                 report.errors += 1
                 checkpoint.fail(stage="error", error=str(exc))
                 _log_error(data_dir, str(exc), operation_id=operation_id, stage="error", file=path)
+                if isinstance(exc, IngestError) and path.suffix.lower() in SUPPORTED_SUFFIXES:
+                    item_id = queue_parser_failure_review_item(data_dir, source_path=path, error=str(exc))
+                    if item_id:
+                        report.parser_failure_items.append(item_id)
+                    report.review_paths.append(data_dir / "review" / "parser-failures.md")
                 if path.exists():
                     digest = _sha256(path)
                     _record_ingest(
@@ -195,14 +209,21 @@ def ingest(
 
 
 def parse_ingest_file(path: Path) -> ParsedInput:
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
-        raise IngestError(f"Could not decode {path} as UTF-8 text.") from exc
-    text = _normalize_document_text(raw)
+    suffix = path.suffix.lower()
+    source_metadata: dict[str, Any] = {"format": suffix.lstrip(".") or "text"}
+    if suffix == ".pdf":
+        text, source_metadata = parse_pdf(path)
+    elif suffix in {".html", ".htm"}:
+        text, source_metadata = parse_html(path)
+    else:
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise IngestError(f"Could not decode {path} as UTF-8 text.") from exc
+        text = _normalize_document_text(raw)
     if not text.strip():
         raise IngestError(f"Ingest file {path} is empty.")
-    return ParsedInput(path=path, text=text, digest=_sha256(path))
+    return ParsedInput(path=path, text=text, digest=_sha256(path), source_metadata=source_metadata)
 
 
 def _operation_id_for_run(data_dir: Path, *, resume: bool) -> str:
@@ -281,6 +302,7 @@ def render_report(report: IngestReport) -> str:
         f"skipped_candidates: {payload['skipped_candidates']}",
         f"duplicates: {payload['duplicates']['count']}",
         f"unsupported_files: {payload['unsupported_files']['count']}",
+        f"parser_failures: {payload['parser_failures']['count']}",
         f"errors: {payload['errors']}",
     ]
     if payload["created_notes"]["note_ids"]:
@@ -307,6 +329,9 @@ def render_report(report: IngestReport) -> str:
     if payload["unsupported_files"]["review_item_ids"]:
         lines.append("unsupported_file_review_item_ids:")
         lines.extend(f"- {item_id}" for item_id in payload["unsupported_files"]["review_item_ids"])
+    if payload["parser_failures"]["review_item_ids"]:
+        lines.append("parser_failure_review_item_ids:")
+        lines.extend(f"- {item_id}" for item_id in payload["parser_failures"]["review_item_ids"])
     if payload["review_paths"]:
         lines.append("review_paths:")
         for path in payload["review_paths"]:
@@ -334,6 +359,7 @@ def ingest_report_payload(report: IngestReport) -> dict[str, Any]:
         *report.classification_items,
         *report.duplicate_items,
         *report.unsupported_file_items,
+        *report.parser_failure_items,
     ]
     return {
         "operation_id": report.operation_id,
@@ -368,6 +394,10 @@ def ingest_report_payload(report: IngestReport) -> dict[str, Any]:
         "unsupported_files": {
             "count": report.unsupported_files,
             "review_item_ids": list(report.unsupported_file_items),
+        },
+        "parser_failures": {
+            "count": len(report.parser_failure_items),
+            "review_item_ids": list(report.parser_failure_items),
         },
         "errors": report.errors,
         "review_item_ids": review_item_ids,
@@ -405,6 +435,8 @@ def _ingest_one(
     env: Mapping[str, str] | None,
     checkpoint: IngestCheckpoint | None = None,
 ) -> None:
+    retry_policy = retry_policy_from_config(config)
+    operation_id = checkpoint.operation_id if checkpoint is not None else None
     extract_route = operation_route(config, "extract")
     classify_route = operation_route(config, "classify")
     integrate_route = operation_route(config, "integrate")
@@ -414,11 +446,18 @@ def _ingest_one(
 
     ingest_config = config.get("ingest", {})
     max_notes = int(ingest_config.get("max_notes_per_doc", 7))
-    extraction = extractor.extract_candidates(
-        text=parsed.text,
-        source_path=parsed.path,
-        max_notes=max_notes,
-        model=extract_route.model,
+    extraction = _provider_call(
+        data_dir=data_dir,
+        parsed=parsed,
+        operation_id=operation_id,
+        phase="extract",
+        retry_policy=retry_policy,
+        call=lambda: extractor.extract_candidates(
+            text=parsed.text,
+            source_path=parsed.path,
+            max_notes=max_notes,
+            model=extract_route.model,
+        ),
     )
     if checkpoint is not None:
         checkpoint.update(
@@ -434,11 +473,19 @@ def _ingest_one(
         if candidate.utility_score == "low":
             report.skipped_candidates += 1
             continue
-        classification = classifier.classify_candidate(
-            candidate=candidate,
-            text=parsed.text,
-            source_path=parsed.path,
-            model=classify_route.model,
+        classification = _provider_call(
+            data_dir=data_dir,
+            parsed=parsed,
+            operation_id=operation_id,
+            phase="classify",
+            retry_policy=retry_policy,
+            candidate_title=candidate.title,
+            call=lambda: classifier.classify_candidate(
+                candidate=candidate,
+                text=parsed.text,
+                source_path=parsed.path,
+                model=classify_route.model,
+            ),
         )
         if checkpoint is not None:
             checkpoint.update(
@@ -471,13 +518,21 @@ def _ingest_one(
         )
 
         try:
-            integration = integrator.integration_verdict(
-                candidate=candidate,
-                classification=classification,
-                matches=matches,
-                text=parsed.text,
-                source_path=parsed.path,
-                model=integrate_route.model,
+            integration = _provider_call(
+                data_dir=data_dir,
+                parsed=parsed,
+                operation_id=operation_id,
+                phase="integrate",
+                retry_policy=retry_policy,
+                candidate_title=candidate.title,
+                call=lambda: integrator.integration_verdict(
+                    candidate=candidate,
+                    classification=classification,
+                    matches=matches,
+                    text=parsed.text,
+                    source_path=parsed.path,
+                    model=integrate_route.model,
+                ),
             )
             target_records = _target_records(matches, records, integration)
             if checkpoint is not None:
@@ -523,8 +578,7 @@ def _ingest_one(
                 candidate,
                 classification=classification,
                 note_id=note_id,
-                source_path=parsed.path,
-                source_hash=parsed.digest,
+                parsed=parsed,
             )
             ensure_topic_layout(data_dir, classification.topic)
             path = canonical_note_path(data_dir, classification.topic, note_id)
@@ -535,7 +589,7 @@ def _ingest_one(
             mutated = True
         elif integration.verdict == "identical":
             for record in target_records:
-                if _append_source_to_note(record.path, source_path=parsed.path, source_hash=parsed.digest):
+                if _append_source_to_note(record.path, parsed=parsed):
                     if checkpoint is not None:
                         checkpoint.record_written_file(record.path)
                     report.source_appends.append(record.note_id)
@@ -623,6 +677,56 @@ def _target_records(
     if integration.verdict != "unrelated" and not target_records:
         raise ProviderError(f"Integration verdict {integration.verdict!r} requires at least one target record.")
     return target_records
+
+
+def _provider_call(
+    *,
+    data_dir: Path,
+    parsed: ParsedInput,
+    operation_id: str | None,
+    phase: str,
+    retry_policy: Any,
+    call: Any,
+    candidate_title: str | None = None,
+) -> Any:
+    detail = f"candidate={candidate_title!r} " if candidate_title else ""
+
+    def on_retry(event: RetryEvent) -> None:
+        _log_error(
+            data_dir,
+            (
+                f"Retrying provider phase={phase} {detail}"
+                f"attempt={event.attempt}/{event.max_attempts} "
+                f"delay={event.delay_seconds:.3f}s reason={event.classification.kind}:{event.classification.detail} "
+                f"error={event.error}"
+            ),
+            operation_id=operation_id,
+            stage="provider-retry",
+            file=parsed.path,
+        )
+
+    def on_final_failure(event: RetryEvent) -> None:
+        _log_error(
+            data_dir,
+            (
+                f"Provider phase={phase} {detail}stopped "
+                f"attempt={event.attempt}/{event.max_attempts} "
+                f"transient={event.classification.transient} "
+                f"reason={event.classification.kind}:{event.classification.detail} "
+                f"error={event.error}"
+            ),
+            operation_id=operation_id,
+            stage="provider-final",
+            file=parsed.path,
+        )
+
+    return call_with_retry(
+        f"ingest:{phase}",
+        call,
+        policy=retry_policy,
+        on_retry=on_retry,
+        on_final_failure=on_final_failure,
+    )
 
 
 def _candidate_checkpoint_id(candidate: CandidateNote) -> str:
@@ -756,8 +860,7 @@ def _candidate_to_note(
     *,
     classification: ClassificationResult,
     note_id: str,
-    source_path: Path,
-    source_hash: str,
+    parsed: ParsedInput,
 ) -> Note:
     today = date.today().isoformat()
     tags = candidate.tags or [normalize_topic_for_path(classification.topic)]
@@ -772,7 +875,7 @@ def _candidate_to_note(
         "status": "active",
         "confidence": classification.confidence,
         "basis": ["ingested source"],
-        "sources": [{"type": "ingest", "ref": source_path.as_posix(), "hash": source_hash}],
+        "sources": [_source_entry(parsed)],
         "retrieval_phrases": candidate.retrieval_phrases,
         "agent_use": candidate.agent_use or [],
         "applies_when": candidate.applies_when or [],
@@ -787,25 +890,34 @@ def _candidate_to_note(
     return note
 
 
-def _append_source_to_note(path: Path, *, source_path: Path, source_hash: str) -> bool:
+def _source_entry(parsed: ParsedInput) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "type": "ingest",
+        "ref": parsed.path.as_posix(),
+        "hash": parsed.digest,
+    }
+    for key, value in sorted(parsed.source_metadata.items()):
+        if value in (None, "", [], {}):
+            continue
+        entry[key] = value
+    return entry
+
+
+def _append_source_to_note(path: Path, *, parsed: ParsedInput) -> bool:
     note = read_note(path)
     frontmatter = dict(note.frontmatter)
     existing_sources = frontmatter.get("sources")
     if not isinstance(existing_sources, list):
         existing_sources = []
 
-    source_ref = source_path.as_posix()
+    source_ref = parsed.path.as_posix()
     for item in existing_sources:
         if not isinstance(item, Mapping):
             continue
-        if item.get("hash") == source_hash or item.get("ref") == source_ref:
+        if item.get("hash") == parsed.digest or item.get("ref") == source_ref:
             return False
 
-    appended = {
-        "type": "ingest",
-        "ref": source_ref,
-        "hash": source_hash,
-    }
+    appended = _source_entry(parsed)
     frontmatter["sources"] = [*existing_sources, appended]
     frontmatter["updated"] = date.today().isoformat()
     updated = Note(frontmatter=frontmatter, body=note.body)
@@ -1054,6 +1166,8 @@ def _record_ingest(
         "processed_at": datetime.now().isoformat(timespec="seconds"),
         "note_ids": note_ids or [],
     }
+    if parsed.source_metadata:
+        entry["source_metadata"] = dict(parsed.source_metadata)
     if archived_path is not None:
         entry["archived_path"] = archived_path.as_posix()
     if error:

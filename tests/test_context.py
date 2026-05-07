@@ -5,9 +5,11 @@ from pathlib import Path
 
 from kb_librarian.config import default_config
 from kb_librarian.context import build_context, build_explore, citation_entries
+from kb_librarian.errors import ProviderError
 from kb_librarian.indexing import reindex_data_dir
 from kb_librarian.init import initialize_data_dir
 from kb_librarian.notes import Note, write_note
+from kb_librarian.providers import MockProvider
 
 
 def _configure_mock_synthesis(data_dir: Path) -> dict[str, object]:
@@ -277,3 +279,55 @@ def test_citation_entries_include_required_metadata(tmp_path):
         "status": "active",
         "confidence": "high",
     }
+
+
+def test_build_context_retries_transient_synthesis_failure(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    _seed_note(
+        tmp_path,
+        note_id="2026-05-05-retry-context-note",
+        title="Retry context note",
+        summary="Retryable synthesis note.",
+        knowledge_type="technique",
+        status="active",
+        confidence="high",
+        retrieval_phrases=["retry context note"],
+    )
+    reindex_data_dir(tmp_path)
+    config = _configure_mock_synthesis(tmp_path)
+    config["providers"]["retry"] = {
+        "max_attempts": 3,
+        "base_delay_seconds": 0.0,
+        "max_delay_seconds": 0.0,
+        "jitter_seconds": 0.0,
+    }
+
+    class FlakySynthesisProvider(MockProvider):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def synthesize_context(self, **kwargs):  # type: ignore[override]
+            self.calls += 1
+            if self.calls == 1:
+                raise ProviderError("timeout while contacting provider")
+            return super().synthesize_context(**kwargs)
+
+    provider = FlakySynthesisProvider()
+
+    def _provider_from_config(*args, **kwargs):
+        return provider
+
+    monkeypatch.setattr("kb_librarian.context.provider_from_config", _provider_from_config)
+
+    result = build_context(
+        tmp_path,
+        config=config,
+        task="retry context note",
+        mode="coding",
+        budget=800,
+    )
+
+    assert result.synthesis_markdown
+    assert provider.calls == 2
+    errors_log = (tmp_path / ".kb" / "errors.log").read_text(encoding="utf-8")
+    assert "stage=provider-context" in errors_log

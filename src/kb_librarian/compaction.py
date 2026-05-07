@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -14,6 +14,7 @@ from kb_librarian.errors import KBLibrarianError
 from kb_librarian.indexing import reindex_data_dir
 from kb_librarian.mutations import atomic_write_note, require_clean_worktree
 from kb_librarian.notes import Note, generate_note_id
+from kb_librarian.provider_retry import RetryEvent, call_with_retry, retry_policy_from_config
 from kb_librarian.providers import (
     CompactionDraft,
     operation_route,
@@ -226,10 +227,22 @@ def draft_compaction_proposal(
 
     route = operation_route(config, "compact")
     provider = provider_from_config(config, route.provider)
-    payload = provider.synthesize_compaction(
-        source_notes=[_provider_note_payload(record, data_dir=data_dir) for record in source_records],
-        cluster_id=cluster_id,
-        model=route.model,
+    retry_policy = retry_policy_from_config(config)
+    payload = call_with_retry(
+        "compact:synthesize",
+        lambda: provider.synthesize_compaction(
+            source_notes=[_provider_note_payload(record, data_dir=data_dir) for record in source_records],
+            cluster_id=cluster_id,
+            model=route.model,
+        ),
+        policy=retry_policy,
+        on_retry=lambda event: _log_provider_event(data_dir, phase="compact", event=event, cluster_id=cluster_id),
+        on_final_failure=lambda event: _log_provider_event(
+            data_dir,
+            phase="compact-final",
+            event=event,
+            cluster_id=cluster_id,
+        ),
     )
     draft = validate_compaction_payload(payload)
 
@@ -344,6 +357,27 @@ def apply_compaction_review_item(
         deleted_note_ids=deleted,
         kept_note_ids=kept,
     )
+
+
+def _log_provider_event(
+    data_dir: Path,
+    *,
+    phase: str,
+    event: RetryEvent,
+    cluster_id: str,
+) -> None:
+    path = data_dir / ".kb" / "errors.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().isoformat(timespec="seconds")
+    message = (
+        f"{stamp} stage=provider-{phase} op={event.operation} "
+        f"attempt={event.attempt}/{event.max_attempts} "
+        f"transient={event.classification.transient} "
+        f"reason={event.classification.kind}:{event.classification.detail} "
+        f"delay={event.delay_seconds:.3f}s cluster_id={cluster_id!r} error={event.error}\n"
+    )
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(message)
 
 
 def resolve_compaction_target(data_dir: Path, records: list[NoteRecord], target: str) -> tuple[list[NoteRecord], str]:

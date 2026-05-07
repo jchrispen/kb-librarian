@@ -1,5 +1,8 @@
 # Phase 04b - Provider Retry and Golden Corpus Harness
 
+Status: Complete
+Completed: 2026-05-07
+
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
 ## Goal
@@ -76,6 +79,47 @@ Make provider-backed behavior more resilient and easier to regression-test. At t
 - Permanent failures remain non-destructive and resumable.
 - Golden corpus checks catch extraction or retrieval regressions deterministically.
 - Default regression testing remains offline unless the user explicitly opts into live-provider checks.
+
+## Completion Record
+
+Completed on 2026-05-07.
+
+Implemented files:
+
+- `src/kb_librarian/provider_retry.py`
+- `src/kb_librarian/config.py`
+- `src/kb_librarian/providers.py`
+- `src/kb_librarian/ingest.py`
+- `src/kb_librarian/context.py`
+- `src/kb_librarian/compaction.py`
+- `tests/test_provider_retry.py`
+- `tests/test_ingest.py`
+- `tests/test_context.py`
+- `tests/test_compaction.py`
+- `tests/test_golden_corpus.py`
+- `tests/fixtures/golden_corpus/expectations.json`
+- `tests/fixtures/golden_corpus/raw/01-agent-context-pattern.md`
+- `tests/fixtures/golden_corpus/raw/02-token-budget-decision.txt`
+- `tests/fixtures/golden_corpus/raw/03-citation-grounding-heuristic.md`
+- `README.md`
+- `docs/configuration.md`
+- `docs/commands.md`
+- `docs/user-guide.md`
+
+Verification:
+
+- `pytest -q tests/test_provider_retry.py tests/test_ingest.py tests/test_context.py tests/test_compaction.py tests/test_golden_corpus.py tests/test_config.py` - passed, 40 tests and 1 opt-in test skipped.
+- `pytest -q` - passed, 130 tests and 1 opt-in test skipped.
+
+Behavior delivered:
+
+- Added configurable provider retry/backoff policy under `providers.retry` with bounded exponential backoff and jitter.
+- Added transient/permanent provider failure classification and unified retry execution helper.
+- Wired retry handling into ingest extraction/classification/integration, context synthesis, exploration synthesis, and compaction synthesis.
+- Extended `.kb/errors.log` diagnostics with retry attempts and final-stop classification details for provider-backed operations.
+- Preserved resumable ingest behavior after exhausted provider retries, including `kb ingest --resume` recovery flow.
+- Added deterministic golden corpus fixtures and assertions for extraction count/type, retrieval phrases, search top source IDs, `kb context` citation-bearing synthesis, and `kb explore` citation-bearing breadth.
+- Added explicit opt-in live-provider golden smoke coverage gated by `KB_GOLDEN_LIVE=1` and `ANTHROPIC_API_KEY`.
 
 ## Out of Scope
 

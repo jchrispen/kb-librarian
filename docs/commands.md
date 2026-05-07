@@ -89,7 +89,7 @@ Use `--tree` to render nested slash-delimited topics as a hierarchy. When `revie
 
 ## `kb ingest`
 
-Ingest one markdown or text file, or process pending files in `raw/`.
+Ingest one markdown, text, PDF, or local HTML file, or process pending files in `raw/`.
 
 ```bash
 kb ingest [<file>] [--data-dir <path>] [--force] [--resume] [--quiet] [--json]
@@ -99,10 +99,17 @@ Current shipped supported input formats:
 
 - `.md`
 - `.txt`
+- `.pdf`
+- `.html`
+- `.htm`
 
-Human-readable and JSON reports include outcome counts, created/appended note IDs, review item IDs for queued work, archived raw paths, warnings, and errors. `--quiet` suppresses the success report and only prints errors.
+PDF parsing extracts text with `pypdf` and does not perform OCR. Local HTML parsing extracts visible text, headings, title, links, and source URL hints where present; it never fetches remote pages.
+
+Human-readable and JSON reports include outcome counts, created/appended note IDs, review item IDs for queued work, parser failures, archived raw paths, warnings, and errors. `--quiet` suppresses the success report and only prints errors.
 
 `kb ingest` writes `.kb/ingest.lock` while it is mutating raw files, notes, review state, or indexes. A second ingest exits without processing. If an earlier ingest was interrupted, run `kb ingest --resume`; use `--force` only when you intend to discard a stale lock/checkpoint and start over.
+
+Provider-backed ingest phases use configurable retry/backoff (`providers.retry`) for transient failures and log retry/final-stop diagnostics to `.kb/errors.log`.
 
 ## `kb review`
 
@@ -129,7 +136,7 @@ Notes:
   - compaction: apply a pending compaction proposal, create the canonical note, supersede/archive source notes according to the proposal, and reindex
   - topic: apply a pending topic split or merge proposal and reindex
 - `kb review accept --force` bypasses the clean-git-worktree guard for compaction and topic mutations.
-- Duplicate and unsupported-file queue items should be handled with `reject` or `defer`.
+- Duplicate, parser-failure, and unsupported-file queue items should be handled with `reject` or `defer`.
 
 Rendered review views include:
 
@@ -137,6 +144,7 @@ Rendered review views include:
 - `review/pending-merge.md`
 - `review/pending-compaction.md`
 - `review/pending-topic.md`
+- `review/parser-failures.md`
 - `review/disputes.md`
 - `review/search-misses.md`
 - `review/stale.md`
@@ -189,6 +197,8 @@ Supported modes:
 
 Human-readable and JSON output include citation metadata by default.
 
+`kb context` uses configurable provider retry/backoff for synthesis failures. Retry attempts and final-stop reasons are appended to `.kb/errors.log`.
+
 Context and exploration retrievals are logged to `.kb/usage.log` without note bodies. Empty retrievals are logged as search misses, and `--report-miss` records an explicit poor-result signal.
 
 ## `kb log-use`
@@ -226,4 +236,18 @@ kb usage [--since <duration>] [--note <id>] [--data-dir <path>]
 
 ## Current Command Surface
 
-The current shipped CLI includes the Phase 1-3 command surface. Phase 4 automation and robustness commands remain planned work.
+The current shipped CLI includes the full Phase 1-3 command surface plus Phase 4a-4c robustness behavior on existing commands (ingest lock/resume, provider retry/backoff, golden corpus checks, and PDF/HTML ingest). Later Phase 4 additions (hook templates and auto-commit policy) remain planned work.
+
+## Golden Corpus Regression Harness
+
+Deterministic golden corpus checks are shipped as tests using the mock provider:
+
+```bash
+pytest -q tests/test_golden_corpus.py
+```
+
+Optional live-provider smoke coverage is gated behind explicit opt-in:
+
+```bash
+KB_GOLDEN_LIVE=1 ANTHROPIC_API_KEY=... pytest -q tests/test_golden_corpus.py::test_golden_corpus_live_provider_opt_in_smoke
+```

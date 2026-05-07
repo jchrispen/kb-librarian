@@ -230,6 +230,53 @@ def test_draft_compaction_proposal_with_mock_provider_queues_review_item(tmp_pat
     assert "- proposed_body:" in rendered
 
 
+def test_draft_compaction_proposal_retries_transient_provider_failure(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    config["providers"]["mock"] = {}
+    config["operations"]["compact"] = {"provider": "mock", "model": "mock-compact"}
+    config["providers"]["retry"] = {
+        "max_attempts": 3,
+        "base_delay_seconds": 0.0,
+        "max_delay_seconds": 0.0,
+        "jitter_seconds": 0.0,
+    }
+    _write_note(
+        tmp_path,
+        note_id="2026-05-05-agent-context-retry-a",
+        title="Agent context A",
+        summary="Use context before coding.",
+    )
+    _write_note(
+        tmp_path,
+        note_id="2026-05-05-agent-context-retry-b",
+        title="Agent context B",
+        summary="Cite context sources.",
+    )
+
+    from kb_librarian.providers import MockProvider
+
+    class FlakyCompactionProvider(MockProvider):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def synthesize_compaction(self, **kwargs):  # type: ignore[override]
+            self.calls += 1
+            if self.calls == 1:
+                raise ProviderError("service unavailable")
+            return super().synthesize_compaction(**kwargs)
+
+    provider = FlakyCompactionProvider()
+    monkeypatch.setattr("kb_librarian.compaction.provider_from_config", lambda *args, **kwargs: provider)
+
+    result = draft_compaction_proposal(tmp_path, config=config, target="agent-systems")
+
+    assert result.created is True
+    assert provider.calls == 2
+    errors_log = (tmp_path / ".kb" / "errors.log").read_text(encoding="utf-8")
+    assert "stage=provider-compact" in errors_log
+
+
 def test_accept_compaction_proposal_creates_canonical_note_and_supersedes_sources(tmp_path):
     initialize_data_dir(tmp_path)
     config = default_config(tmp_path)

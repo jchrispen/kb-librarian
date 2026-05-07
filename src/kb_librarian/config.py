@@ -69,6 +69,12 @@ def default_config(data_dir: str | Path = DEFAULT_DATA_DIR, *, hooks: bool = Fal
             "anthropic": {
                 "api_key_env": "ANTHROPIC_API_KEY",
             },
+            "retry": {
+                "max_attempts": 3,
+                "base_delay_seconds": 0.25,
+                "max_delay_seconds": 2.0,
+                "jitter_seconds": 0.1,
+            },
         },
         "operations": {
             "extract": {"provider": "anthropic", "model": "claude-sonnet-4-6"},
@@ -240,6 +246,18 @@ def validate_config(config: Mapping[str, Any]) -> None:
         raise ConfigError("Config section providers.anthropic must be a mapping.")
     if not anthropic.get("api_key_env"):
         raise ConfigError("Config key providers.anthropic.api_key_env is required.")
+    retry = config["providers"].get("retry")
+    if retry is not None:
+        if not isinstance(retry, Mapping):
+            raise ConfigError("Config section providers.retry must be a mapping when present.")
+        _validate_positive_int(retry, "providers.retry.max_attempts", minimum=1)
+        _validate_non_negative_number(retry, "providers.retry.base_delay_seconds")
+        _validate_non_negative_number(retry, "providers.retry.max_delay_seconds")
+        _validate_non_negative_number(retry, "providers.retry.jitter_seconds")
+        base_delay = float(retry.get("base_delay_seconds", 0.0) or 0.0)
+        max_delay = float(retry.get("max_delay_seconds", 0.0) or 0.0)
+        if max_delay < base_delay:
+            raise ConfigError("Config key providers.retry.max_delay_seconds must be >= base_delay_seconds.")
 
     providers = config["providers"]
     for operation in REQUIRED_SECTION_KEYS["operations"]:
@@ -262,3 +280,21 @@ def validate_config(config: Mapping[str, Any]) -> None:
         value = indexes[key]
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
             raise ConfigError(f"Config key indexes.{key} must be a positive integer.")
+
+
+def _validate_positive_int(section: Mapping[str, Any], key: str, *, minimum: int) -> None:
+    leaf = key.rsplit(".", maxsplit=1)[-1]
+    if leaf not in section:
+        return
+    value = section[leaf]
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise ConfigError(f"Config key {key} must be an integer >= {minimum}.")
+
+
+def _validate_non_negative_number(section: Mapping[str, Any], key: str) -> None:
+    leaf = key.rsplit(".", maxsplit=1)[-1]
+    if leaf not in section:
+        return
+    value = section[leaf]
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or float(value) < 0:
+        raise ConfigError(f"Config key {key} must be a number >= 0.")

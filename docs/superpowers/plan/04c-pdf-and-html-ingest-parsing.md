@@ -2,6 +2,9 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
+Status: Complete
+Completed: 2026-05-07
+
 ## Goal
 
 Expand ingest coverage to common local document formats without relying on OCR or remote browsing. At the end of this milestone, `kb ingest` can parse local PDF and HTML files, preserve useful source metadata, and fail safely when extraction is impossible.
@@ -79,3 +82,23 @@ Supported ingest formats now include `.pdf`, `.html`, and `.htm` in addition to 
 - Image OCR for PDFs.
 - Remote web fetching.
 - Hook templates and auto-commit policy.
+
+## Completion Record
+
+Implemented files:
+
+- `src/kb_librarian/parsers.py`
+- `src/kb_librarian/ingest.py`
+- `src/kb_librarian/review.py`
+- `pyproject.toml`
+- `tests/test_ingest.py`
+- `README.md`
+- `docs/commands.md`
+- `docs/user-guide.md`
+- `docs/superpowers/plan/04-robustness-and-polish.md`
+- `docs/superpowers/plan/04c-pdf-and-html-ingest-parsing.md`
+
+Verification:
+
+- `python3 -m pytest -q tests/test_ingest.py tests/test_review.py tests/test_cli.py` - 46 passed, 2 skipped before local `pypdf` installation.
+- `/tmp/kb-librarian-04c-venv/bin/python -m pytest -q tests/test_ingest.py tests/test_review.py tests/test_cli.py` - 48 passed with `pypdf` installed.

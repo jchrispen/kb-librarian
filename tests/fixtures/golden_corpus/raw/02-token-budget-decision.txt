@@ -1,0 +1,6 @@
+Token Budget Decision For Context
+
+Decision: cap context responses so agents can iterate quickly.
+Keep enough supporting notes to preserve confidence and traceability.
+Relevance-first budgeting should include direct techniques, one tradeoff note, and one risk note.
+Exclude long historical digressions unless the current task explicitly needs them.

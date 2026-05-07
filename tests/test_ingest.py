@@ -3,10 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from kb_librarian.config import default_config, write_config_file
+from kb_librarian.errors import ProviderError
 from kb_librarian.ingest import ingest, ingest_report_payload, parse_ingest_file, render_report
 from kb_librarian.init import initialize_data_dir
 from kb_librarian.notes import Note, read_note, write_note
+from kb_librarian.providers import MockProvider
 from kb_librarian.storage import canonical_note_path, ensure_topic_layout
 
 
@@ -50,6 +54,40 @@ def _seed_note(data_dir: Path, *, topic: str, note_id: str, title: str, body: st
     return path
 
 
+def _write_minimal_pdf(path: Path, text: str) -> None:
+    escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    stream = f"BT /F1 12 Tf 72 720 Td ({escaped}) Tj ET".encode("ascii")
+    objects = [
+        b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+        b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+        (
+            b"3 0 obj\n"
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\n"
+            b"endobj\n"
+        ),
+        b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+        b"5 0 obj\n<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream\nendobj\n",
+    ]
+    payload = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for item in objects:
+        offsets.append(len(payload))
+        payload.extend(item)
+    xref_offset = len(payload)
+    payload.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    payload.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        payload.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    payload.extend(
+        (
+            f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref_offset}\n%%EOF\n"
+        ).encode("ascii")
+    )
+    path.write_bytes(bytes(payload))
+
+
 def test_parse_ingest_file_normalizes_text(tmp_path):
     source = tmp_path / "note.md"
     source.write_text("# Heading\r\n\r\nBody\r\n", encoding="utf-8")
@@ -58,6 +96,52 @@ def test_parse_ingest_file_normalizes_text(tmp_path):
 
     assert parsed.text == "# Heading\n\nBody\n"
     assert len(parsed.digest) == 64
+    assert parsed.source_metadata == {"format": "md"}
+
+
+def test_parse_ingest_file_extracts_html_text_and_metadata(tmp_path):
+    source = tmp_path / "capture.html"
+    source.write_text(
+        "<!doctype html><html><head>"
+        "<title>HTML ingest parsing</title>"
+        "<link rel='canonical' href='https://example.test/capture'>"
+        "</head><body>"
+        "<nav>navigation should be ignored</nav>"
+        "<h1>HTML ingest parsing</h1>"
+        "<p>Visible guidance for coding agents.</p>"
+        "<p hidden>hidden material</p>"
+        "<a href='/details'>Details page</a>"
+        "<script>ignored()</script>"
+        "</body></html>",
+        encoding="utf-8",
+    )
+
+    parsed = parse_ingest_file(source)
+
+    assert "# HTML ingest parsing" in parsed.text
+    assert "Visible guidance for coding agents." in parsed.text
+    assert "navigation should be ignored" not in parsed.text
+    assert "hidden material" not in parsed.text
+    assert parsed.source_metadata["format"] == "html"
+    assert parsed.source_metadata["title"] == "HTML ingest parsing"
+    assert parsed.source_metadata["source_url"] == "https://example.test/capture"
+    assert parsed.source_metadata["links"] == [
+        {"text": "Details page", "href": "https://example.test/details"}
+    ]
+
+
+def test_parse_ingest_file_extracts_pdf_text_and_page_metadata(tmp_path):
+    pytest.importorskip("pypdf")
+    source = tmp_path / "capture.pdf"
+    _write_minimal_pdf(source, "PDF ingest parsing keeps page metadata for agents.")
+
+    parsed = parse_ingest_file(source)
+
+    assert "[PDF page 1]" in parsed.text
+    assert "PDF ingest parsing keeps page metadata for agents." in parsed.text
+    assert parsed.source_metadata["format"] == "pdf"
+    assert parsed.source_metadata["page_count"] == 1
+    assert parsed.source_metadata["pages"] == [1]
 
 
 def test_ingest_raw_markdown_with_mock_provider_creates_note_and_archives(tmp_path):
@@ -125,7 +209,7 @@ def test_ingest_duplicate_success_hash_archives_to_duplicates(tmp_path):
 def test_ingest_unsupported_file_logs_and_leaves_raw_file(tmp_path):
     initialize_data_dir(tmp_path)
     config = configure_mock_provider(tmp_path)
-    source = tmp_path / "raw" / "capture.pdf"
+    source = tmp_path / "raw" / "capture.bin"
     source.write_text("not a pdf for this test", encoding="utf-8")
 
     report = ingest(tmp_path, config=config)
@@ -136,6 +220,75 @@ def test_ingest_unsupported_file_logs_and_leaves_raw_file(tmp_path):
     assert report.errors == 0
     assert source.exists()
     assert "Unsupported ingest file extension" in (tmp_path / ".kb" / "errors.log").read_text(encoding="utf-8")
+
+
+def test_ingest_raw_html_preserves_source_metadata_in_note(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = configure_mock_provider(tmp_path)
+    source = tmp_path / "raw" / "agent-context.html"
+    source.write_text(
+        "<html><head>"
+        "<title>Agent context from HTML</title>"
+        "<meta property='og:url' content='https://example.test/agent-context'>"
+        "</head><body>"
+        "<h1>Agent context from HTML</h1>"
+        "<p>Prefer task-shaped context for coding agents instead of broad browsing.</p>"
+        "<a href='https://example.test/ref'>Reference</a>"
+        "</body></html>",
+        encoding="utf-8",
+    )
+
+    report = ingest(tmp_path, config=config)
+
+    assert report.processed_files == 1
+    assert len(report.created_notes) == 1
+    note_path = next((tmp_path / "topics").rglob(f"{report.created_notes[0]}.md"))
+    note = read_note(note_path)
+    source_entry = note.frontmatter["sources"][0]
+    assert source_entry["ref"].endswith("raw/agent-context.html")
+    assert source_entry["format"] == "html"
+    assert source_entry["title"] == "Agent context from HTML"
+    assert source_entry["source_url"] == "https://example.test/agent-context"
+    assert source_entry["links"] == [{"href": "https://example.test/ref", "text": "Reference"}]
+
+
+def test_ingest_raw_pdf_preserves_page_metadata_in_note(tmp_path):
+    pytest.importorskip("pypdf")
+    initialize_data_dir(tmp_path)
+    config = configure_mock_provider(tmp_path)
+    source = tmp_path / "raw" / "agent-context.pdf"
+    _write_minimal_pdf(source, "PDF agent context parsing helps coding agents preserve provenance.")
+
+    report = ingest(tmp_path, config=config)
+
+    assert report.processed_files == 1
+    assert len(report.created_notes) == 1
+    note_path = next((tmp_path / "topics").rglob(f"{report.created_notes[0]}.md"))
+    note = read_note(note_path)
+    source_entry = note.frontmatter["sources"][0]
+    assert source_entry["ref"].endswith("raw/agent-context.pdf")
+    assert source_entry["format"] == "pdf"
+    assert source_entry["page_count"] == 1
+    assert source_entry["pages"] == [1]
+
+
+def test_ingest_parser_failure_logs_review_item_and_leaves_raw_file(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = configure_mock_provider(tmp_path)
+    source = tmp_path / "raw" / "broken.pdf"
+    source.write_text("not actually a pdf", encoding="utf-8")
+
+    report = ingest(tmp_path, config=config)
+
+    assert report.errors == 1
+    assert report.processed_files == 0
+    assert len(report.parser_failure_items) == 1
+    assert report.parser_failure_items[0].startswith("parser-")
+    assert source.exists()
+    assert "broken.pdf" in (tmp_path / ".kb" / "errors.log").read_text(encoding="utf-8")
+    review = (tmp_path / "review" / "parser-failures.md").read_text(encoding="utf-8")
+    assert "broken.pdf" in review
+    assert "Suggested action: fix source extraction or replace the raw file." in review
 
 
 def test_ingest_identical_appends_source_without_rewriting_body(tmp_path):
@@ -248,3 +401,81 @@ def test_ingest_report_payload_and_human_output_align(tmp_path):
     assert f"classification_items: {payload['classification_items']['count']}" in human
     assert "classification_review_item_ids:" in human
     assert report.classification_items[0] in human
+
+
+def test_ingest_retries_transient_provider_failure_and_logs_attempts(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    config = configure_mock_provider(tmp_path)
+    config["providers"]["retry"] = {
+        "max_attempts": 3,
+        "base_delay_seconds": 0.0,
+        "max_delay_seconds": 0.0,
+        "jitter_seconds": 0.0,
+    }
+    source = tmp_path / "raw" / "retry.md"
+    source.write_text(
+        "# Retryable provider call\n\nPrefer task-shaped context for coding agents.\n",
+        encoding="utf-8",
+    )
+
+    class FlakyProvider(MockProvider):
+        def __init__(self) -> None:
+            self.extract_calls = 0
+
+        def extract_candidates(self, **kwargs):  # type: ignore[override]
+            self.extract_calls += 1
+            if self.extract_calls == 1:
+                raise ProviderError("service unavailable")
+            return super().extract_candidates(**kwargs)
+
+    flaky = FlakyProvider()
+    monkeypatch.setattr("kb_librarian.ingest.provider_from_config", lambda *args, **kwargs: flaky)
+
+    report = ingest(tmp_path, config=config)
+
+    assert report.errors == 0
+    assert report.processed_files == 1
+    assert len(report.created_notes) == 1
+    assert flaky.extract_calls == 2
+    errors_log = (tmp_path / ".kb" / "errors.log").read_text(encoding="utf-8")
+    assert "stage=provider-retry" in errors_log
+    assert "phase=extract" in errors_log
+
+
+def test_ingest_final_provider_failure_is_resumable(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    config = configure_mock_provider(tmp_path)
+    config["providers"]["retry"] = {
+        "max_attempts": 2,
+        "base_delay_seconds": 0.0,
+        "max_delay_seconds": 0.0,
+        "jitter_seconds": 0.0,
+    }
+    source = tmp_path / "raw" / "resume-after-provider-failure.md"
+    source.write_text(
+        "# Resume after provider failure\n\nPrefer task-shaped context for coding agents.\n",
+        encoding="utf-8",
+    )
+
+    class FailingProvider(MockProvider):
+        def extract_candidates(self, **kwargs):  # type: ignore[override]
+            raise ProviderError("service unavailable")
+
+    monkeypatch.setattr("kb_librarian.ingest.provider_from_config", lambda *args, **kwargs: FailingProvider())
+    failed = ingest(tmp_path, config=config)
+
+    assert failed.errors == 1
+    assert failed.processed_files == 0
+    assert source.exists()
+    state = json.loads((tmp_path / ".kb" / "state.json").read_text(encoding="utf-8"))
+    assert state["ingest"]["status"] == "error"
+    errors_log = (tmp_path / ".kb" / "errors.log").read_text(encoding="utf-8")
+    assert "stage=provider-final" in errors_log
+
+    monkeypatch.setattr("kb_librarian.ingest.provider_from_config", lambda *args, **kwargs: MockProvider())
+    resumed = ingest(tmp_path, config=config, resume=True)
+
+    assert resumed.errors == 0
+    assert resumed.processed_files == 1
+    assert len(resumed.created_notes) == 1
+    assert not source.exists()

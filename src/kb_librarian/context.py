@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Mapping
 
 from kb_librarian.indexing import reindex_data_dir
+from kb_librarian.provider_retry import RetryEvent, call_with_retry, retry_policy_from_config
 from kb_librarian.providers import LLMProvider, operation_route, provider_from_config
 from kb_librarian.search_index import query_candidates, tokenize_query
 from kb_librarian.storage import NOTE_ID_REFERENCE_PATTERN, NoteRecord, load_note_records
@@ -107,6 +108,7 @@ def build_context(
     budget: int,
     env: Mapping[str, str] | None = None,
 ) -> ContextResult:
+    retry_policy = retry_policy_from_config(config)
     records = load_note_records(data_dir, validate=True)
     if not records:
         return ContextResult(
@@ -188,12 +190,23 @@ def build_context(
 
     route = operation_route(config, "synthesize")
     provider: LLMProvider = provider_from_config(config, route.provider, env=env)
-    synthesis = provider.synthesize_context(
-        task=task,
-        mode=mode,
-        budget=budget,
-        model=route.model,
-        selected_notes=[_selection_payload(item) for item in selected],
+    synthesis = call_with_retry(
+        "context:synthesize",
+        lambda: provider.synthesize_context(
+            task=task,
+            mode=mode,
+            budget=budget,
+            model=route.model,
+            selected_notes=[_selection_payload(item) for item in selected],
+        ),
+        policy=retry_policy,
+        on_retry=lambda event: _log_provider_event(data_dir, phase="context", event=event, query=task),
+        on_final_failure=lambda event: _log_provider_event(
+            data_dir,
+            phase="context-final",
+            event=event,
+            query=task,
+        ),
     )
     return ContextResult(
         task=task,
@@ -213,6 +226,7 @@ def build_explore(
     budget: int,
     env: Mapping[str, str] | None = None,
 ) -> ExploreResult:
+    retry_policy = retry_policy_from_config(config)
     records = load_note_records(data_dir, validate=True)
     if not records:
         return _empty_explore_result(problem=problem, budget=budget)
@@ -257,11 +271,22 @@ def build_explore(
 
     route = operation_route(config, "synthesize")
     provider: LLMProvider = provider_from_config(config, route.provider, env=env)
-    synthesis = provider.synthesize_exploration(
-        problem=problem,
-        budget=budget,
-        model=route.model,
-        selected_notes=[_selection_payload(item) for item in selected],
+    synthesis = call_with_retry(
+        "explore:synthesize",
+        lambda: provider.synthesize_exploration(
+            problem=problem,
+            budget=budget,
+            model=route.model,
+            selected_notes=[_selection_payload(item) for item in selected],
+        ),
+        policy=retry_policy,
+        on_retry=lambda event: _log_provider_event(data_dir, phase="explore", event=event, query=problem),
+        on_final_failure=lambda event: _log_provider_event(
+            data_dir,
+            phase="explore-final",
+            event=event,
+            query=problem,
+        ),
     )
 
     return ExploreResult(
@@ -284,6 +309,27 @@ def citation_entries(items: list[ContextSelection]) -> list[dict[str, str]]:
         }
         for item in items
     ]
+
+
+def _log_provider_event(
+    data_dir: Path,
+    *,
+    phase: str,
+    event: RetryEvent,
+    query: str,
+) -> None:
+    path = data_dir / ".kb" / "errors.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().isoformat(timespec="seconds")
+    message = (
+        f"{stamp} stage=provider-{phase} op={event.operation} "
+        f"attempt={event.attempt}/{event.max_attempts} "
+        f"transient={event.classification.transient} "
+        f"reason={event.classification.kind}:{event.classification.detail} "
+        f"delay={event.delay_seconds:.3f}s query={query!r} error={event.error}\n"
+    )
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(message)
 
 
 def _score_record(
@@ -825,4 +871,3 @@ def _extract_ids_from_value(value: Any, *, into: set[str]) -> None:
     if isinstance(value, list):
         for nested in value:
             _extract_ids_from_value(nested, into=into)
-

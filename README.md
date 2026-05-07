@@ -6,7 +6,7 @@ It stores durable knowledge as markdown files in a separate data directory, buil
 
 ## Status
 
-This repository currently ships the Phase 1 core workflow, Phase 2 daily-use ergonomics, and Phase 3 hygiene/topic surfaces:
+This repository currently ships the Phase 1 core workflow, Phase 2 daily-use ergonomics, Phase 3 hygiene/topic surfaces, and early Phase 4 robustness features (ingest lock/resume plus provider retry and golden corpus regression harness):
 
 - `kb init`
 - `kb add`
@@ -31,7 +31,7 @@ Planned later-phase features such as automation templates are documented in the 
 
 - Publishes the KB as markdown files plus frontmatter in a local data directory
 - Builds local lexical indexes for note retrieval
-- Ingests markdown and text files into candidate notes
+- Ingests markdown, text, PDF, and local HTML files into candidate notes
 - Preserves review-gated behavior for risky integrations
 - Returns compact, cited context for coding and design tasks
 - Detects overlapping note clusters and drafts reviewable compaction proposals without rewriting notes
@@ -40,6 +40,8 @@ Planned later-phase features such as automation templates are documented in the 
 - Reports KB health with read-only doctor diagnostics and an offline self-test
 - Supports slash-delimited hierarchical topics with nested topic indexes and `kb topics --tree`
 - Supports clean-worktree-protected topic rename/promote operations and review-gated topic split/merge proposals
+- Retries transient provider failures with bounded backoff and logs retry/final-stop diagnostics
+- Includes deterministic golden corpus regression tests plus opt-in live-provider smoke coverage
 
 ## Install
 
@@ -121,6 +123,7 @@ Important review files:
 - `review/pending-merge.md`: generated view for merge proposals
 - `review/pending-compaction.md`: generated view for compaction clusters and proposals
 - `review/pending-topic.md`: generated view for topic split and merge proposals
+- `review/parser-failures.md`: generated view for supported files that could not be parsed
 - `review/disputes.md`: generated view for contradictions
 - `review/stale.md`: generated view for stale-note reverification work
 - `review/orphans.md`: generated view for isolated note cleanup
@@ -132,7 +135,7 @@ Important review files:
 
 - `kb init`: create the KB directory structure and default config
 - `kb add`: create a note directly, or queue raw input when metadata is incomplete
-- `kb ingest`: process markdown or text files into notes or review items, with lock/resume recovery
+- `kb ingest`: process markdown, text, PDF, or local HTML files into notes or review items, with lock/resume recovery
 - `kb reindex`: rebuild markdown indexes, backlinks, manifest, stats, lexical index, and optionally scan compaction clusters
 - `kb doctor`: inspect config, notes, review state, generated indexes, retrieval state, ingest recovery, errors, and provider routes
 - `kb compact`: draft a review-gated canonical note proposal for a topic or cluster
@@ -149,7 +152,9 @@ Important review files:
 
 ## Provider Notes
 
-The default config uses the Anthropic provider routes. That means `kb ingest` and `kb context` need `ANTHROPIC_API_KEY` unless you reconfigure the provider in `.kb/config.yaml`.
+The default config uses the Anthropic provider routes. That means `kb ingest`, `kb context`, `kb explore`, and `kb compact` need `ANTHROPIC_API_KEY` unless you reconfigure providers in `.kb/config.yaml`.
+
+Provider retries are configurable under `providers.retry` (`max_attempts`, `base_delay_seconds`, `max_delay_seconds`, `jitter_seconds`) and apply to provider-backed operations.
 
 For offline development or tests, the codebase also supports a deterministic `mock` provider, but it is not the default config written by `kb init`.
 
@@ -164,3 +169,15 @@ For offline development or tests, the codebase also supports a deterministic `mo
 ## Development Notes
 
 The root README is the end-user entry point. The files under `docs/superpowers/` are design and planning artifacts for implementation work.
+
+Run deterministic corpus regression checks:
+
+```bash
+pytest -q tests/test_golden_corpus.py
+```
+
+Optional live-provider smoke run (explicit opt-in):
+
+```bash
+KB_GOLDEN_LIVE=1 ANTHROPIC_API_KEY=... pytest -q tests/test_golden_corpus.py::test_golden_corpus_live_provider_opt_in_smoke
+```

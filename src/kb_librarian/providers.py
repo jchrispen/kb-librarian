@@ -664,6 +664,16 @@ class AnthropicProvider:
         try:
             with urllib.request.urlopen(request, timeout=120) as response:
                 raw = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            try:
+                response_body = exc.read().decode("utf-8")
+            except Exception:
+                response_body = ""
+            body_excerpt = response_body.strip().replace("\n", " ")[:240]
+            message = f"Anthropic request failed with HTTP {exc.code}"
+            if body_excerpt:
+                message += f": {body_excerpt}"
+            raise ProviderError(message) from exc
         except urllib.error.URLError as exc:
             raise ProviderError(f"Anthropic request failed: {exc}") from exc
 

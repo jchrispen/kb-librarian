@@ -75,7 +75,7 @@ If you do not provide enough metadata for direct note creation, `kb add` queues 
 
 ## Ingest Source Material
 
-Use `kb ingest` to process markdown or text files.
+Use `kb ingest` to process markdown, text, PDF, or local HTML files.
 
 Ingest one file:
 
@@ -99,6 +99,11 @@ Current shipped ingest support is:
 
 - `.md`
 - `.txt`
+- `.pdf`
+- `.html`
+- `.htm`
+
+PDF ingest extracts embedded text and records page metadata where available; it does not run OCR on image-only PDFs. HTML ingest parses local files only, ignores common boilerplate and hidden/script/style content, and preserves title, source URL hints, and links in note source metadata when present.
 
 Ingest may:
 
@@ -107,7 +112,7 @@ Ingest may:
 - queue classification review items
 - queue merge proposals
 - mark disputes
-- record duplicate and unsupported-file review items
+- record duplicate, parser-failure, and unsupported-file review items
 - archive processed raw files
 
 The default report includes stable counts plus the note IDs and review item IDs that need attention. JSON output is available for automation:
@@ -119,6 +124,8 @@ kb ingest --json --data-dir /path/to/kb
 Use `--quiet` when only errors should be printed.
 
 Ingest holds `.kb/ingest.lock` while mutating KB state and records progress in `.kb/state.json`. If another ingest is active, the command refuses to process files. If a lock or checkpoint is stale after an interruption, prefer `--resume`; use `--force` only when you want to discard stale recovery state and start a new ingest.
+
+Provider-backed ingest calls use configurable retry/backoff (`providers.retry`) for transient failures. Retry attempts and final-stop reasons are appended to `.kb/errors.log`.
 
 ## Rebuild Indexes
 
@@ -164,6 +171,12 @@ kb doctor --self-test
 ```
 
 The self-test uses a temporary KB and the deterministic mock provider. It does not mutate your configured KB.
+
+For deterministic extraction/retrieval regression checks, run:
+
+```bash
+pytest -q tests/test_golden_corpus.py
+```
 
 ## Search and Inspect Notes
 
@@ -324,6 +337,7 @@ Review items are stored in `review/review-items.json` with stable IDs, status, p
 - `review/pending-merge.md`
 - `review/pending-compaction.md`
 - `review/pending-topic.md`
+- `review/parser-failures.md`
 - `review/disputes.md`
 - `review/stale.md`
 - `review/orphans.md`
@@ -385,7 +399,7 @@ For `searchmiss` items, provide a resolution note:
 kb review accept <item-id> --resolution-note "Added retrieval phrase and topic seed note." --data-dir /path/to/kb
 ```
 
-In the current shipped CLI, accept actions are supported for classification, merge, dispute, search-miss, compaction, and topic proposal items. Duplicate and unsupported-file items should be handled with `reject` or `defer`.
+In the current shipped CLI, accept actions are supported for classification, merge, dispute, search-miss, compaction, and topic proposal items. Duplicate, parser-failure, and unsupported-file items should be handled with `reject` or `defer`.
 
 ## Recommended Early Workflow
 
@@ -400,4 +414,4 @@ In the current shipped CLI, accept actions are supported for classification, mer
 9. Run `kb usage` periodically to inspect retrieval and note-use signals.
 10. Run `kb reindex --scan-clusters` periodically when note overlap is likely.
 11. Run `kb doctor` when generated state, review state, or provider setup may be stale.
-12. Check `kb review` periodically for classification, merge, compaction, topic, dispute, search-miss, duplicate, and unsupported-file items.
+12. Check `kb review` periodically for classification, merge, compaction, topic, dispute, search-miss, duplicate, parser-failure, and unsupported-file items.

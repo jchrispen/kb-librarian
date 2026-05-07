@@ -143,6 +143,16 @@ QUEUE_DEFINITIONS: dict[str, QueueDefinition] = {
         proposed_action="inspect duplicate source",
         order=50,
     ),
+    "parser_failure": QueueDefinition(
+        queue="parser_failure",
+        count_key="parser_failure",
+        id_prefix="parser",
+        file_name="parser-failures.md",
+        file_title="Parser Failures",
+        priority="medium",
+        proposed_action="fix source extraction or replace the raw file",
+        order=55,
+    ),
     "unsupported_file": QueueDefinition(
         queue="unsupported_file",
         count_key="unsupported_file",
@@ -453,6 +463,29 @@ def queue_unsupported_file_review_item(data_dir: Path, *, source_path: Path) -> 
             title=source_path.name,
             target_notes=[],
             proposed_action=QUEUE_DEFINITIONS["unsupported_file"].proposed_action,
+            payload=payload,
+        ),
+    )
+
+
+def queue_parser_failure_review_item(data_dir: Path, *, source_path: Path, error: str) -> str | None:
+    payload = {
+        "source_path": source_path.as_posix(),
+        "reason": error,
+    }
+    return add_review_item(
+        data_dir,
+        queue="parser_failure",
+        title=source_path.name,
+        target_notes=[],
+        proposed_action=QUEUE_DEFINITIONS["parser_failure"].proposed_action,
+        payload=payload,
+        priority="medium",
+        fingerprint=_payload_fingerprint(
+            queue="parser_failure",
+            title=source_path.name,
+            target_notes=[],
+            proposed_action=QUEUE_DEFINITIONS["parser_failure"].proposed_action,
             payload=payload,
         ),
     )
@@ -821,6 +854,7 @@ def render_review_summary(
         f"orphan: {counts.get('orphan', 0)}",
         f"low_utility: {counts.get('low_utility', 0)}",
         f"duplicate: {counts.get('duplicate', 0)}",
+        f"parser_failure: {counts.get('parser_failure', 0)}",
         f"unsupported_file: {counts.get('unsupported_file', 0)}",
     ]
 
