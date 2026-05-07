@@ -109,7 +109,7 @@ Inspect and resolve review items backed by durable review state.
 ```bash
 kb review [list] [--data-dir <path>]
 kb review explain <item-id> [--data-dir <path>]
-kb review accept <item-id> [--topic <topic> --type <knowledge-type> | --note-id <id>] [--append-body] [--resolution-note <text>] [--data-dir <path>]
+kb review accept <item-id> [--topic <topic> --type <knowledge-type> | --note-id <id>] [--append-body] [--resolution-note <text>] [--force] [--data-dir <path>]
 kb review reject <item-id> [--data-dir <path>]
 kb review defer <item-id> --days <n> [--data-dir <path>]
 ```
@@ -124,6 +124,9 @@ Notes:
   - merge: append candidate body to target note(s) only with explicit `--append-body`
   - dispute: acknowledge dispute on target note(s)
   - searchmiss: record a resolution note (`--resolution-note`)
+  - compaction: apply a pending compaction proposal, create the canonical note, supersede/archive source notes according to the proposal, and reindex
+  - topic: apply a pending topic split or merge proposal and reindex
+- `kb review accept --force` bypasses the clean-git-worktree guard for compaction and topic mutations.
 - Duplicate and unsupported-file queue items should be handled with `reject` or `defer`.
 
 Rendered review views include:
@@ -131,6 +134,7 @@ Rendered review views include:
 - `review/pending-classification.md`
 - `review/pending-merge.md`
 - `review/pending-compaction.md`
+- `review/pending-topic.md`
 - `review/disputes.md`
 - `review/search-misses.md`
 - `review/stale.md`
@@ -146,6 +150,23 @@ kb compact <topic-or-cluster> [--json] [--data-dir <path>]
 ```
 
 `kb compact` asks the configured `operations.compact` provider to draft frontmatter, body markdown, source-note dispositions, and a diff summary. The draft is stored as a pending `compaction` review item in `review/review-items.json` and rendered in `review/pending-compaction.md`; source notes are not rewritten.
+
+Accepted compaction proposals are applied with `kb review accept <item-id>`. Acceptance requires a clean git worktree when the KB is inside git unless `--force` is supplied.
+
+## `kb topic`
+
+Reorganize topics directly, or create review-gated topic split and merge proposals.
+
+```bash
+kb topic rename <old> <new> [--force] [--data-dir <path>]
+kb topic promote <topic...> --under <parent> [--force] [--data-dir <path>]
+kb topic split <topic> --into <new...> [--data-dir <path>]
+kb topic merge <a> <b> --as <name> [--data-dir <path>]
+```
+
+`rename` and `promote` move note files, update note frontmatter topics, clean generated topic artifacts, and rebuild indexes. They require a clean git worktree when the KB is inside git unless `--force` is supplied.
+
+`split` and `merge` create pending `topic` review items rendered in `review/pending-topic.md`. Apply them with `kb review accept <item-id>`.
 
 ## `kb context`
 
@@ -203,6 +224,4 @@ kb usage [--since <duration>] [--note <id>] [--data-dir <path>]
 
 ## Current Command Surface
 
-The current shipped CLI does not yet include these planned commands:
-
-- topic reorganization commands
+The current shipped CLI includes the Phase 1-3 command surface. Phase 4 automation and robustness commands remain planned work.

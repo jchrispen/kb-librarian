@@ -211,6 +211,24 @@ kb topics --tree --data-dir /path/to/kb
 
 When review state exists, these views also include stale/orphan/review counts per topic.
 
+Rename or promote topics when the move is mechanical:
+
+```bash
+kb topic rename old-topic new-topic --data-dir /path/to/kb
+kb topic promote retrieval --under agent-systems --data-dir /path/to/kb
+```
+
+These commands move note files, update note frontmatter topics, and rebuild indexes. If the KB is inside git, they require a clean worktree unless you pass `--force`.
+
+Use review-gated proposals when the move requires judgment:
+
+```bash
+kb topic split mixed-topic --into agent-systems/retrieval agent-systems/review --data-dir /path/to/kb
+kb topic merge agent-systems/retrieval retrieval-patterns --as agent-systems/retrieval --data-dir /path/to/kb
+```
+
+Apply accepted split or merge proposals with `kb review accept <item-id>`.
+
 ## Retrieve Task Context
 
 Use `kb context` before coding, design, debugging, or review work.
@@ -297,6 +315,7 @@ Review items are stored in `review/review-items.json` with stable IDs, status, p
 - `review/pending-classification.md`
 - `review/pending-merge.md`
 - `review/pending-compaction.md`
+- `review/pending-topic.md`
 - `review/disputes.md`
 - `review/stale.md`
 - `review/orphans.md`
@@ -313,7 +332,13 @@ Compaction cluster items can be turned into proposal drafts:
 kb compact <topic-or-cluster> --data-dir /path/to/kb
 ```
 
-The target can be a topic name, a compaction review item ID, or a `cluster-...` ID from `review/pending-compaction.md`. The command stores provider-drafted frontmatter, body markdown, source-note dispositions, and a diff summary as another pending compaction review item. Applying compaction is later review-gated work; this command does not mutate canonical notes.
+The target can be a topic name, a compaction review item ID, or a `cluster-...` ID from `review/pending-compaction.md`. The command stores provider-drafted frontmatter, body markdown, source-note dispositions, and a diff summary as another pending compaction review item. It does not mutate canonical notes until you accept the resulting proposal:
+
+```bash
+kb review accept <compaction-item-id> --data-dir /path/to/kb
+```
+
+Accepted compaction creates a canonical note, preserves source-note provenance, supersedes or archives source notes according to the proposal, and rebuilds indexes. If the KB is inside git, acceptance requires a clean worktree unless you pass `--force`.
 
 Explain one review item:
 
@@ -352,7 +377,7 @@ For `searchmiss` items, provide a resolution note:
 kb review accept <item-id> --resolution-note "Added retrieval phrase and topic seed note." --data-dir /path/to/kb
 ```
 
-In the current shipped CLI, accept actions are supported for classification, merge, dispute, and search-miss items. Compaction, duplicate, and unsupported-file items should be handled with `reject` or `defer`.
+In the current shipped CLI, accept actions are supported for classification, merge, dispute, search-miss, compaction, and topic proposal items. Duplicate and unsupported-file items should be handled with `reject` or `defer`.
 
 ## Recommended Early Workflow
 
@@ -367,4 +392,4 @@ In the current shipped CLI, accept actions are supported for classification, mer
 9. Run `kb usage` periodically to inspect retrieval and note-use signals.
 10. Run `kb reindex --scan-clusters` periodically when note overlap is likely.
 11. Run `kb doctor` when generated state, review state, or provider setup may be stale.
-12. Check `kb review` periodically for classification, merge, compaction, dispute, search-miss, duplicate, and unsupported-file items.
+12. Check `kb review` periodically for classification, merge, compaction, topic, dispute, search-miss, duplicate, and unsupported-file items.

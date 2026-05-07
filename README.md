@@ -6,7 +6,7 @@ It stores durable knowledge as markdown files in a separate data directory, buil
 
 ## Status
 
-This repository currently ships the Phase 1 core workflow, Phase 2 daily-use ergonomics, and Phase 3a-3d hygiene/topic surfaces:
+This repository currently ships the Phase 1 core workflow, Phase 2 daily-use ergonomics, and Phase 3 hygiene/topic surfaces:
 
 - `kb init`
 - `kb add`
@@ -16,6 +16,7 @@ This repository currently ships the Phase 1 core workflow, Phase 2 daily-use erg
 - `kb search`
 - `kb get`
 - `kb topics`
+- `kb topic`
 - `kb review`
 - `kb context`
 - `kb explore`
@@ -24,7 +25,7 @@ This repository currently ships the Phase 1 core workflow, Phase 2 daily-use erg
 - `kb usage`
 - `kb doctor`
 
-Planned later-phase features such as topic reorganization and automation templates are documented in the design and implementation plans, but they are not part of the shipped CLI yet.
+Planned later-phase features such as automation templates are documented in the design and implementation plans, but they are not part of the shipped CLI yet.
 
 ## What It Does
 
@@ -34,9 +35,11 @@ Planned later-phase features such as topic reorganization and automation templat
 - Preserves review-gated behavior for risky integrations
 - Returns compact, cited context for coding and design tasks
 - Detects overlapping note clusters and drafts reviewable compaction proposals without rewriting notes
+- Applies accepted compaction proposals with source-note supersession and index regeneration
 - Surfaces stale, orphan, and low-utility notes with explainable review evidence
 - Reports KB health with read-only doctor diagnostics and an offline self-test
 - Supports slash-delimited hierarchical topics with nested topic indexes and `kb topics --tree`
+- Supports clean-worktree-protected topic rename/promote operations and review-gated topic split/merge proposals
 
 ## Install
 
@@ -117,6 +120,7 @@ Important review files:
 - `review/pending-classification.md`: generated view for classification review
 - `review/pending-merge.md`: generated view for merge proposals
 - `review/pending-compaction.md`: generated view for compaction clusters and proposals
+- `review/pending-topic.md`: generated view for topic split and merge proposals
 - `review/disputes.md`: generated view for contradictions
 - `review/stale.md`: generated view for stale-note reverification work
 - `review/orphans.md`: generated view for isolated note cleanup
@@ -135,6 +139,7 @@ Important review files:
 - `kb search`: search notes by title, summary, tags, retrieval phrases, and body text
 - `kb get`: inspect one note by ID
 - `kb topics`: list topics and render nested hierarchy with `--tree`
+- `kb topic`: rename/promote topics directly and create review-gated split/merge proposals
 - `kb review`: inspect and resolve bounded review queues backed by `review/review-items.json`
 - `kb context`: retrieve compact cited context for a task
 - `kb explore`: retrieve broader adjacent ideas and alternatives

@@ -1,5 +1,8 @@
 # Phase 03e - Review-Gated Hygiene Mutations
 
+Status: Complete
+Completed: 2026-05-07
+
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
 ## Goal
@@ -81,6 +84,39 @@ Apply accepted structural hygiene changes safely. At the end of this milestone, 
 - Topic reorganization commands update paths, frontmatter, indexes, and review history safely.
 - Split and merge remain review-gated rather than direct destructive operations.
 - Hygiene mutations respect clean-worktree safety unless explicitly forced.
+
+## Completion Record
+
+Completed on 2026-05-07.
+
+Implemented files:
+
+- `src/kb_librarian/mutations.py`
+- `src/kb_librarian/compaction.py`
+- `src/kb_librarian/topic_mutations.py`
+- `src/kb_librarian/review.py`
+- `src/kb_librarian/cli.py`
+- `src/kb_librarian/init.py`
+- `src/kb_librarian/paths.py`
+- `tests/test_compaction.py`
+- `tests/test_topic_mutations.py`
+- `tests/test_cli.py`
+- `README.md`
+- `docs/commands.md`
+- `docs/user-guide.md`
+
+Verification:
+
+- `pytest -q tests/test_compaction.py tests/test_topic_mutations.py tests/test_review.py` - passed, 23 tests.
+- `pytest -q tests/test_cli.py::test_kb_review_accept_compaction_proposal_smoke_in_git_repo tests/test_cli.py::test_kb_topic_split_reject_smoke` - passed, 2 tests.
+- `pytest -q` - passed, 110 tests.
+
+Behavior delivered:
+
+- `kb review accept <compaction-item>` now applies compaction proposals by creating a canonical note, preserving source-note references, superseding or archiving source notes according to dispositions, and rebuilding indexes.
+- Mutating hygiene operations require a clean git worktree when the KB is inside git unless `--force` is supplied.
+- Added `kb topic rename` and `kb topic promote` for direct topic moves with note path/frontmatter updates and index regeneration.
+- Added `kb topic split` and `kb topic merge` as review-gated `topic` proposals rendered in `review/pending-topic.md`; accepted proposals move notes through `kb review accept`.
 
 ## Out of Scope
 
