@@ -105,7 +105,7 @@ kb context "review this architecture" --mode architecture --data-dir /path/to/kb
 
 ## Data Directory Layout
 
-By default, KB Librarian uses `/mnt/c/workspace/source/internal/kb` unless you pass `--data-dir` or set `KB_DATA_DIR`.
+By default, KB Librarian uses the current directory (`.`) unless you pass `--data-dir` or set `KB_DATA_DIR`.
 
 A KB data directory contains:
 

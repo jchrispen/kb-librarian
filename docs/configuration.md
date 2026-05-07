@@ -17,7 +17,7 @@ The CLI resolves the KB data directory in this order:
 1. `--data-dir`
 2. `KB_DATA_DIR`
 3. configured `data_dir` from `<default-data-dir>/.kb/config.yaml`
-4. `/mnt/c/workspace/source/internal/kb`
+4. current directory (`.`)
 
 ## Default Config Shape
 
@@ -37,7 +37,7 @@ The generated config includes these sections:
 ## Example
 
 ```yaml
-data_dir: /mnt/c/workspace/source/internal/kb
+data_dir: .
 
 providers:
   anthropic:

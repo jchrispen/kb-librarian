@@ -3,7 +3,7 @@
 **Date:** 2026-05-04  
 **Status:** Revised design direction; ready for MVP implementation planning  
 **Tool repo:** `/mnt/c/workspace/source/internal/kb-librarian/`  
-**Default data repo:** `/mnt/c/workspace/source/internal/kb/`  
+**Default data repo:** current working directory (`.`)  
 **Design thesis:** Agent-accessible knowledge artifact, published as files, inspectable by humans when needed.
 
 ---
@@ -489,7 +489,7 @@ Returns summaries by default, not full bodies.
 ### 4.7 Configuration
 
 ```yaml
-data_dir: /mnt/c/workspace/source/internal/kb
+data_dir: .
 
 providers:
   anthropic:
@@ -1274,4 +1274,3 @@ The design is working when:
 12. Added privacy/provider seams without making them MVP scope.
 13. Reduced early emphasis on hierarchy, PDF parsing, and compaction.
 14. Changed the MVP success test to whether agents do better work with fewer tokens.
-

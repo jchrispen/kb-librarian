@@ -56,7 +56,7 @@ If you omit `--data-dir`, KB Librarian resolves the data directory in this order
 1. `--data-dir`
 2. `KB_DATA_DIR`
 3. `data_dir` stored in `<default-data-dir>/.kb/config.yaml`
-4. `/mnt/c/workspace/source/internal/kb`
+4. current directory (`.`)
 
 ## Create Notes Directly
 

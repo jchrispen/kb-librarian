@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-DEFAULT_DATA_DIR = Path("/mnt/c/workspace/source/internal/kb")
+DEFAULT_DATA_DIR = Path(".")
 
 KB_DIR_NAME = ".kb"
 

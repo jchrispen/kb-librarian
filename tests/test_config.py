@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from kb_librarian.config import (
@@ -11,6 +13,7 @@ from kb_librarian.config import (
     validate_config,
     write_config_file,
 )
+from kb_librarian.paths import DEFAULT_DATA_DIR
 
 
 def test_default_config_contains_phase_1_sections(tmp_path):
@@ -36,6 +39,12 @@ def test_default_config_contains_phase_1_sections(tmp_path):
     assert "privacy:" in rendered
     assert "hooks:" in rendered
     assert "session_start_ingest: false" in rendered
+
+
+def test_default_data_dir_is_current_directory():
+    assert DEFAULT_DATA_DIR == Path(".")
+    assert default_config()["data_dir"] == "."
+    assert resolve_data_dir(env={}) == Path(".")
 
 
 def test_resolve_data_dir_precedence(tmp_path):

@@ -126,6 +126,6 @@ The resolution order is:
 1. `--data-dir`
 2. `KB_DATA_DIR`
 3. configured `data_dir`
-4. `/mnt/c/workspace/source/internal/kb`
+4. current directory (`.`)
 
 Use `--data-dir` explicitly if you want to remove ambiguity.
