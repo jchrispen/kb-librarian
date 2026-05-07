@@ -134,6 +134,8 @@ Ingest holds `.kb/ingest.lock` while mutating KB state and records progress in `
 
 Provider-backed ingest calls use configurable retry/backoff (`providers.retry`) for transient failures. Retry attempts and final-stop reasons are appended to `.kb/errors.log`.
 
+If `git.auto_commit` and `git.commit_ingests` are enabled, successful ingest runs create a git commit after all notes, review items, raw archives, indexes, and automation diagnostics are written. Auto-commit stays off by default, and skipped commits print an explicit reason.
+
 ## Rebuild Indexes
 
 Run `kb reindex` after manual note edits or when you want to rebuild generated state.
@@ -247,6 +249,8 @@ kb topic promote retrieval --under agent-systems --data-dir /path/to/kb
 ```
 
 These commands move note files, update note frontmatter topics, and rebuild indexes. If the KB is inside git, they require a clean worktree unless you pass `--force`.
+
+With `git.auto_commit` and `git.commit_topic_reorganizations` enabled, successful topic reorganizations or topic proposals are committed after the command succeeds.
 
 Use review-gated proposals when the move requires judgment:
 

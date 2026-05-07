@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
 import tempfile
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from typing import Any, Iterable, Mapping
 
 from kb_librarian.config import default_config, read_config_file, validate_config, write_config_file
 from kb_librarian.errors import ConfigError, KBLibrarianError, NoteParseError, NoteValidationError
+from kb_librarian.git_auto import git_worktree_root
 from kb_librarian.indexing import (
     _build_backlinks,
     group_records_for_indexing,
@@ -112,6 +114,8 @@ def run_doctor(data_dir: str | Path, *, env: Mapping[str, str] | None = None) ->
     _check_fts(root, records, findings)
     _check_raw_ingest_errors(root, findings)
     if config is not None:
+        _check_parser_dependencies(findings)
+        _check_auto_commit_config(root, config, findings)
         _check_provider_routes(config, environ, findings)
 
     return DoctorReport(data_dir=root, findings=findings)
@@ -749,6 +753,92 @@ def _check_provider_routes(
         and _subsystem_count(findings, "Providers", "error") == errors_before
     ):
         findings.append(DoctorFinding("Providers", "ok", "provider-routes", "Provider routes are configured."))
+
+
+def _check_parser_dependencies(findings: list[DoctorFinding]) -> None:
+    try:
+        import pypdf  # noqa: F401
+    except ImportError:
+        findings.append(
+            DoctorFinding(
+                "Parsers",
+                "warn",
+                "pdf-parser-missing",
+                "PDF ingest requires the optional pypdf dependency; install package dependencies before ingesting PDFs.",
+            )
+        )
+        return
+    findings.append(DoctorFinding("Parsers", "ok", "pdf-parser", "PDF parser dependency is available."))
+    findings.append(DoctorFinding("Parsers", "ok", "html-parser", "HTML parser uses the Python standard library."))
+
+
+def _check_auto_commit_config(
+    data_dir: Path,
+    config: Mapping[str, Any],
+    findings: list[DoctorFinding],
+) -> None:
+    git_config = config.get("git", {})
+    if not isinstance(git_config, Mapping):
+        return
+    if not bool(git_config.get("auto_commit", False)):
+        findings.append(DoctorFinding("Automation", "ok", "auto-commit-disabled", "Auto-commit is disabled."))
+        return
+
+    warnings_before = _subsystem_count(findings, "Automation", "warn")
+    errors_before = _subsystem_count(findings, "Automation", "error")
+    if shutil.which("git") is None:
+        findings.append(
+            DoctorFinding(
+                "Automation",
+                "error",
+                "git-missing",
+                "git.auto_commit is enabled, but the git executable is not available.",
+            )
+        )
+    elif git_worktree_root(data_dir) is None:
+        findings.append(
+            DoctorFinding(
+                "Automation",
+                "warn",
+                "auto-commit-no-worktree",
+                "git.auto_commit is enabled, but the data directory is not inside a git worktree.",
+                data_dir,
+            )
+        )
+
+    enabled_scopes = [
+        key
+        for key in (
+            "commit_ingests",
+            "commit_reviews",
+            "commit_reindexes",
+            "commit_topic_reorganizations",
+        )
+        if bool(git_config.get(key, key != "commit_reindexes"))
+    ]
+    if not enabled_scopes:
+        findings.append(
+            DoctorFinding(
+                "Automation",
+                "warn",
+                "auto-commit-no-scopes",
+                "git.auto_commit is enabled, but all auto-commit scopes are disabled.",
+            )
+        )
+    if bool(git_config.get("allow_unrelated_changes", False)):
+        findings.append(
+            DoctorFinding(
+                "Automation",
+                "warn",
+                "auto-commit-unrelated-allowed",
+                "git.allow_unrelated_changes is true; auto-commit will operate with pre-existing worktree changes.",
+            )
+        )
+    if (
+        _subsystem_count(findings, "Automation", "warn") == warnings_before
+        and _subsystem_count(findings, "Automation", "error") == errors_before
+    ):
+        findings.append(DoctorFinding("Automation", "ok", "auto-commit-ready", "Auto-commit configuration is usable."))
 
 
 def _extract_referenced_ids(record: NoteRecord) -> set[str]:

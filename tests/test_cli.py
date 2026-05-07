@@ -9,6 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from kb_librarian.config import default_config, write_config_file
 
 
@@ -39,6 +41,10 @@ def run_cli(
 
 def run_git(cwd: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=cwd, text=True, capture_output=True, check=True)
+
+
+def git_stdout(cwd: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, text=True, capture_output=True, check=True).stdout.strip()
 
 
 def test_kb_help_smoke():
@@ -466,6 +472,60 @@ def test_kb_ingest_mock_provider_smoke(tmp_path):
     assert payload["created_notes"]["count"] == 1
     assert payload["created_notes"]["note_ids"]
     assert payload["errors"] == 0
+    assert payload["auto_commit"]["attempted"] is False
+
+
+def test_kb_ingest_auto_commit_smoke(tmp_path):
+    if shutil.which("git") is None:
+        pytest.skip("git is not available")
+    init_result = run_cli("init", "--data-dir", str(tmp_path))
+    assert init_result.returncode == 0
+
+    config = default_config(tmp_path)
+    config["providers"]["mock"] = {}
+    config["operations"]["extract"] = {"provider": "mock", "model": "mock-extract"}
+    config["operations"]["classify"] = {"provider": "mock", "model": "mock-classify"}
+    config["operations"]["integrate"] = {"provider": "mock", "model": "mock-integrate"}
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    run_git(tmp_path, "init")
+    run_git(tmp_path, "config", "user.email", "test@example.com")
+    run_git(tmp_path, "config", "user.name", "Test User")
+    run_git(tmp_path, "add", ".")
+    run_git(tmp_path, "commit", "-m", "initial kb")
+    initial_count = int(git_stdout(tmp_path, "rev-list", "--count", "HEAD"))
+
+    first_source = tmp_path / "raw" / "default-auto-commit.md"
+    first_source.write_text(
+        "# Default auto commit\n\nPrefer explicit opt-in before automation commits notes.\n",
+        encoding="utf-8",
+    )
+    default_result = run_cli("ingest", "--data-dir", str(tmp_path))
+
+    assert default_result.returncode == 0
+    assert "Auto-commit" not in default_result.stdout
+    assert int(git_stdout(tmp_path, "rev-list", "--count", "HEAD")) == initial_count
+
+    run_git(tmp_path, "add", ".")
+    run_git(tmp_path, "commit", "-m", "manual first ingest")
+    config["git"]["auto_commit"] = True
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+    run_git(tmp_path, "add", ".")
+    run_git(tmp_path, "commit", "-m", "enable auto commit")
+    enabled_count = int(git_stdout(tmp_path, "rev-list", "--count", "HEAD"))
+
+    second_source = tmp_path / "raw" / "enabled-auto-commit.md"
+    second_source.write_text(
+        "# Enabled auto commit\n\nCommit generated notes after successful opted-in ingest.\n",
+        encoding="utf-8",
+    )
+    enabled_result = run_cli("ingest", "--data-dir", str(tmp_path))
+
+    assert enabled_result.returncode == 0
+    assert "Auto-committed" in enabled_result.stdout
+    assert int(git_stdout(tmp_path, "rev-list", "--count", "HEAD")) == enabled_count + 1
+    assert git_stdout(tmp_path, "log", "-1", "--pretty=%s").startswith("kb: ingest")
+    assert git_stdout(tmp_path, "status", "--porcelain") == ""
 
 
 def test_kb_context_mock_provider_smoke(tmp_path):

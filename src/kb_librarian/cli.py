@@ -25,6 +25,7 @@ from kb_librarian.errors import (
     NoteNotFoundError,
     NoteValidationError,
 )
+from kb_librarian.git_auto import AutoCommitResult, GitSnapshot, capture_git_snapshot, maybe_auto_commit
 from kb_librarian.hygiene import flag_suspect_note
 from kb_librarian.indexing import ReindexResult, group_records_for_indexing, reindex_data_dir
 from kb_librarian.init import initialize_data_dir, render_hooks_guidance, render_preamble_guidance
@@ -387,6 +388,7 @@ def _handle_ingest(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
     config = load_config(data_dir)
+    auto_before = _capture_auto_commit_before(data_dir, config)
     report = ingest(
         data_dir,
         config=config,
@@ -395,10 +397,24 @@ def _handle_ingest(args: argparse.Namespace) -> int:
         quiet=bool(args.quiet),
         resume=bool(args.resume),
     )
+    auto_result = None
+    if report.errors == 0:
+        auto_result = maybe_auto_commit(
+            data_dir,
+            config,
+            operation="ingest",
+            identifiers=report.created_notes or ([report.operation_id] if report.operation_id else []),
+            before=auto_before,
+            related_before_paths=_ingest_related_before_paths(args.file),
+            related_before_dirs=[] if args.file else [data_dir / "raw"],
+        )
     if args.json and not args.quiet:
-        print(json.dumps(ingest_report_payload(report), indent=2, sort_keys=True))
+        payload = ingest_report_payload(report)
+        payload["auto_commit"] = _auto_commit_payload(auto_result)
+        print(json.dumps(payload, indent=2, sort_keys=True))
     elif not args.quiet:
         print(render_report(report), end="")
+        _print_auto_commit_result(auto_result)
     elif report.errors:
         print(
             "error: ingest completed with "
@@ -430,6 +446,7 @@ def _handle_review(args: argparse.Namespace) -> int:
         return 0
 
     if action == "accept":
+        auto_before = _capture_auto_commit_before(data_dir, config)
         result = accept_review_item(
             data_dir,
             item_id,
@@ -441,6 +458,15 @@ def _handle_review(args: argparse.Namespace) -> int:
             force=bool(args.force),
         )
         print(result.message)
+        if result.changed:
+            auto_result = maybe_auto_commit(
+                data_dir,
+                config,
+                operation="review",
+                identifiers=[f"accept {result.item_id}"],
+                before=auto_before,
+            )
+            _print_auto_commit_result(auto_result)
         return 0
 
     if action == "reject":
@@ -631,6 +657,8 @@ def _handle_explore(args: argparse.Namespace) -> int:
 def _handle_add(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
+    config = load_config(data_dir)
+    auto_before = _capture_auto_commit_before(data_dir, config)
     source_text, source_name = _read_add_input(args.from_file)
     parsed_seed = _try_parse_seed_note(source_text)
 
@@ -646,6 +674,14 @@ def _handle_add(args: argparse.Namespace) -> int:
     if not topic or not knowledge_type:
         queued_path = _queue_raw_input(data_dir, source_text, source_name=source_name)
         print(f"Queued raw input at {queued_path}")
+        auto_result = maybe_auto_commit(
+            data_dir,
+            config,
+            operation="ingest",
+            identifiers=[queued_path.name],
+            before=auto_before,
+        )
+        _print_auto_commit_result(auto_result)
         return 0
 
     records = load_note_records(data_dir, validate=True)
@@ -672,6 +708,14 @@ def _handle_add(args: argparse.Namespace) -> int:
     result = reindex_data_dir(data_dir)
     print(f"Created note {note_id} at {path}")
     _print_reindex_result(result)
+    auto_result = maybe_auto_commit(
+        data_dir,
+        config,
+        operation="ingest",
+        identifiers=[note_id],
+        before=auto_before,
+    )
+    _print_auto_commit_result(auto_result)
     return 0
 
 
@@ -679,8 +723,17 @@ def _handle_reindex(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
     config = load_config(data_dir)
+    auto_before = _capture_auto_commit_before(data_dir, config)
     result = reindex_data_dir(data_dir, config=config, scan_clusters=bool(args.scan_clusters))
     _print_reindex_result(result)
+    auto_result = maybe_auto_commit(
+        data_dir,
+        config,
+        operation="reindex",
+        identifiers=["scan-clusters"] if args.scan_clusters else [],
+        before=auto_before,
+    )
+    _print_auto_commit_result(auto_result)
     return 0
 
 
@@ -696,11 +749,56 @@ def _handle_doctor(args: argparse.Namespace) -> int:
     return 1 if report.error_count else 0
 
 
+def _capture_auto_commit_before(data_dir: Path, config: dict[str, Any]) -> GitSnapshot | None:
+    git_config = config.get("git", {})
+    if isinstance(git_config, dict) and bool(git_config.get("auto_commit", False)):
+        return capture_git_snapshot(data_dir)
+    return None
+
+
+def _print_auto_commit_result(result: AutoCommitResult | None) -> None:
+    if result is None or not result.attempted:
+        return
+    if result.commit_sha:
+        print(f"{result.message} ({result.commit_sha})")
+    else:
+        print(result.message)
+
+
+def _auto_commit_payload(result: AutoCommitResult | None) -> dict[str, object]:
+    if result is None:
+        return {"attempted": False, "committed": False}
+    return {
+        "attempted": result.attempted,
+        "committed": result.committed,
+        "message": result.message,
+        "commit_sha": result.commit_sha,
+        "paths": list(result.paths),
+    }
+
+
+def _ingest_related_before_paths(file_arg: str | None) -> list[Path]:
+    if not file_arg:
+        return []
+    path = Path(file_arg).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return [path]
+
+
 def _handle_compact(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
     config = load_config(data_dir)
+    auto_before = _capture_auto_commit_before(data_dir, config)
     result = draft_compaction_proposal(data_dir, config=config, target=str(args.target))
+    auto_result = maybe_auto_commit(
+        data_dir,
+        config,
+        operation="compact",
+        identifiers=[result.review_item_id],
+        before=auto_before,
+    )
     if args.json:
         payload = {
             "review_item_id": result.review_item_id,
@@ -708,6 +806,7 @@ def _handle_compact(args: argparse.Namespace) -> int:
             "source_note_ids": result.source_note_ids,
             "created": result.created,
             "diff_summary": result.draft.diff_summary,
+            "auto_commit": _auto_commit_payload(auto_result),
         }
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
@@ -718,6 +817,7 @@ def _handle_compact(args: argparse.Namespace) -> int:
     print(f"source_notes: {', '.join(result.source_note_ids)}")
     print(f"diff_summary: {result.draft.diff_summary}")
     print(f"Review: kb review explain {result.review_item_id} --data-dir {data_dir}")
+    _print_auto_commit_result(auto_result)
     return 0
 
 
@@ -870,6 +970,8 @@ def _handle_topics(args: argparse.Namespace) -> int:
 def _handle_topic_rename(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
+    config = load_config(data_dir)
+    auto_before = _capture_auto_commit_before(data_dir, config)
     result = rename_topic(
         data_dir,
         old_topic=str(args.old),
@@ -877,12 +979,22 @@ def _handle_topic_rename(args: argparse.Namespace) -> int:
         force=bool(args.force),
     )
     print(f"Renamed topic {args.old} -> {args.new}; moved {len(result.moved_notes)} note(s).")
+    auto_result = maybe_auto_commit(
+        data_dir,
+        config,
+        operation="topic",
+        identifiers=[f"rename {args.old} {args.new}"],
+        before=auto_before,
+    )
+    _print_auto_commit_result(auto_result)
     return 0
 
 
 def _handle_topic_promote(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
+    config = load_config(data_dir)
+    auto_before = _capture_auto_commit_before(data_dir, config)
     result = promote_topics(
         data_dir,
         topics=[str(topic) for topic in args.topics],
@@ -890,12 +1002,22 @@ def _handle_topic_promote(args: argparse.Namespace) -> int:
         force=bool(args.force),
     )
     print(f"Promoted {len(args.topics)} topic(s) under {args.under}; moved {len(result.moved_notes)} note(s).")
+    auto_result = maybe_auto_commit(
+        data_dir,
+        config,
+        operation="topic",
+        identifiers=[f"promote {args.under}"],
+        before=auto_before,
+    )
+    _print_auto_commit_result(auto_result)
     return 0
 
 
 def _handle_topic_split(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
+    config = load_config(data_dir)
+    auto_before = _capture_auto_commit_before(data_dir, config)
     result = queue_topic_split_proposal(
         data_dir,
         topic=str(args.topic),
@@ -905,12 +1027,22 @@ def _handle_topic_split(args: argparse.Namespace) -> int:
     print(f"{verb} topic split proposal {result.review_item_id}.")
     print(f"moves: {len(result.moves)}")
     print(f"Review: kb review explain {result.review_item_id} --data-dir {data_dir}")
+    auto_result = maybe_auto_commit(
+        data_dir,
+        config,
+        operation="topic",
+        identifiers=[result.review_item_id],
+        before=auto_before,
+    )
+    _print_auto_commit_result(auto_result)
     return 0
 
 
 def _handle_topic_merge(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
+    config = load_config(data_dir)
+    auto_before = _capture_auto_commit_before(data_dir, config)
     result = queue_topic_merge_proposal(
         data_dir,
         left_topic=str(args.left),
@@ -921,6 +1053,14 @@ def _handle_topic_merge(args: argparse.Namespace) -> int:
     print(f"{verb} topic merge proposal {result.review_item_id}.")
     print(f"moves: {len(result.moves)}")
     print(f"Review: kb review explain {result.review_item_id} --data-dir {data_dir}")
+    auto_result = maybe_auto_commit(
+        data_dir,
+        config,
+        operation="topic",
+        identifiers=[result.review_item_id],
+        before=auto_before,
+    )
+    _print_auto_commit_result(auto_result)
     return 0
 
 

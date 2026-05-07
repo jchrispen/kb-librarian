@@ -51,6 +51,19 @@ kb ingest --resume --data-dir <path>
 
 Use `kb doctor --data-dir <path>` to inspect the lock and `.kb/state.json` checkpoint. Use `kb ingest --force` only when you intend to discard stale recovery state and start over.
 
+## Auto-commit did not create a commit
+
+Auto-commit is disabled unless `git.auto_commit: true` is set in `.kb/config.yaml`. The operation-specific scope must also be enabled, such as `git.commit_ingests` for ingest or `git.commit_reviews` for review acceptance and compaction proposals.
+
+If auto-commit is enabled but skipped, the CLI prints the reason. Common causes:
+
+- the KB is not inside a git worktree
+- the worktree had pre-existing unrelated changes
+- the operation produced no new changes
+- `git.commit_reindexes` is false for an index-only reindex
+
+Run `kb doctor --data-dir <path>` to check automation configuration, parser dependencies, and recovery state.
+
 ## Review items are piling up
 
 Use `kb review` to see bounded pending counts and stable item IDs:

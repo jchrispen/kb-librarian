@@ -88,6 +88,11 @@ review:
 
 git:
   auto_commit: false
+  commit_ingests: true
+  commit_reviews: true
+  commit_reindexes: false
+  commit_topic_reorganizations: true
+  allow_unrelated_changes: false
   require_clean_worktree_for_rewrites: true
 
 privacy:
@@ -119,6 +124,25 @@ If the key is missing, provider-backed commands fail with an explicit error.
 - `jitter_seconds`: random jitter added to each retry delay
 
 Transient failures (for example timeouts, rate limits, and provider 5xx responses) are retried. Non-transient schema/validation failures stop without retry.
+
+## Git Automation
+
+Auto-commit is off by default:
+
+```yaml
+git:
+  auto_commit: false
+```
+
+When `git.auto_commit` is set to `true`, successful note/review operations may create commits after the command completes. The scoped policy keys are:
+
+- `commit_ingests`: commit successful `kb ingest` and `kb add` note/raw-input changes.
+- `commit_reviews`: commit `kb review accept` changes and `kb compact` proposals.
+- `commit_topic_reorganizations`: commit `kb topic` rename/promote/split/merge changes.
+- `commit_reindexes`: commit index-only `kb reindex` changes. This stays `false` by default to avoid noisy generated-artifact commits.
+- `allow_unrelated_changes`: permit auto-commit when the git worktree already had unrelated changes. This stays `false` by default.
+
+If auto-commit is enabled but skipped, the CLI prints the reason and appends an automation diagnostic to `.kb/errors.log`.
 
 ## Offline Mock Provider
 

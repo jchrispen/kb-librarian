@@ -43,7 +43,7 @@ kb doctor [--data-dir <path>] [--self-test]
 
 `kb doctor` groups findings by subsystem and prints `ok`, `warn`, or `error` severities. It returns nonzero when any `error` finding is present.
 
-Checks include required layout, config validity, note schema validity, duplicate IDs, broken note ID references, review state readability, ingest lock/checkpoint recovery state, markdown index freshness, backlinks, manifest freshness, lexical index freshness, raw ingest errors, and provider route presence.
+Checks include required layout, config validity, note schema validity, duplicate IDs, broken note ID references, review state readability, ingest lock/checkpoint recovery state, markdown index freshness, backlinks, manifest freshness, lexical index freshness, raw ingest errors, parser dependency availability, auto-commit configuration, and provider route presence.
 
 `kb doctor --self-test` creates a temporary KB, configures the deterministic mock provider, ingests one tiny fixture, rebuilds indexes, searches it, and runs doctor against the fixture. It is offline and does not mutate your configured KB.
 
@@ -111,6 +111,8 @@ Human-readable and JSON reports include outcome counts, created/appended note ID
 
 Provider-backed ingest phases use configurable retry/backoff (`providers.retry`) for transient failures and log retry/final-stop diagnostics to `.kb/errors.log`.
 
+When `git.auto_commit` and `git.commit_ingests` are enabled, successful ingests are committed after completion. JSON output includes an `auto_commit` object with attempted/committed status, message, commit SHA, and paths.
+
 ## `kb review`
 
 Inspect and resolve review items backed by durable review state.
@@ -163,6 +165,8 @@ kb compact <topic-or-cluster> [--json] [--data-dir <path>]
 
 Accepted compaction proposals are applied with `kb review accept <item-id>`. Acceptance requires a clean git worktree when the KB is inside git unless `--force` is supplied.
 
+When auto-commit is enabled for reviews, successful compaction proposals and accepted review mutations are committed after the operation succeeds.
+
 ## `kb topic`
 
 Reorganize topics directly, or create review-gated topic split and merge proposals.
@@ -177,6 +181,8 @@ kb topic merge <a> <b> --as <name> [--data-dir <path>]
 `rename` and `promote` move note files, update note frontmatter topics, clean generated topic artifacts, and rebuild indexes. They require a clean git worktree when the KB is inside git unless `--force` is supplied.
 
 `split` and `merge` create pending `topic` review items rendered in `review/pending-topic.md`. Apply them with `kb review accept <item-id>`.
+
+When `git.auto_commit` and `git.commit_topic_reorganizations` are enabled, successful topic changes and proposals are committed after the command succeeds.
 
 ## `kb context`
 
@@ -236,7 +242,7 @@ kb usage [--since <duration>] [--note <id>] [--data-dir <path>]
 
 ## Current Command Surface
 
-The current shipped CLI includes the full Phase 1-3 command surface plus Phase 4a-4d robustness behavior on existing commands (ingest lock/resume, provider retry/backoff, golden corpus checks, PDF/HTML ingest, and opt-in hook/scheduler templates). Optional auto-commit policy remains planned work.
+The current shipped CLI includes the full Phase 1-4 command surface: ingest lock/resume, provider retry/backoff, golden corpus checks, PDF/HTML ingest, opt-in hook/scheduler templates, guarded optional auto-commit, and final diagnostics.
 
 ## Golden Corpus Regression Harness
 

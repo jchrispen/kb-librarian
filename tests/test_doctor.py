@@ -131,3 +131,16 @@ def test_doctor_detects_stale_manifest(tmp_path):
 
     assert report.error_count == 0
     assert "manifest-stale" in rendered
+
+
+def test_doctor_reports_auto_commit_enabled_outside_git(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = _mock_config(tmp_path)
+    config["git"]["auto_commit"] = True
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 0
+    assert "auto-commit-no-worktree" in rendered

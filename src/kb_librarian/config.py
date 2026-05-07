@@ -116,6 +116,11 @@ def default_config(data_dir: str | Path = DEFAULT_DATA_DIR, *, hooks: bool = Fal
         },
         "git": {
             "auto_commit": False,
+            "commit_ingests": True,
+            "commit_reviews": True,
+            "commit_reindexes": False,
+            "commit_topic_reorganizations": True,
+            "allow_unrelated_changes": False,
             "require_clean_worktree_for_rewrites": True,
         },
         "privacy": {
@@ -280,6 +285,19 @@ def validate_config(config: Mapping[str, Any]) -> None:
         value = indexes[key]
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
             raise ConfigError(f"Config key indexes.{key} must be a positive integer.")
+
+    git = config["git"]
+    for key in (
+        "auto_commit",
+        "commit_ingests",
+        "commit_reviews",
+        "commit_reindexes",
+        "commit_topic_reorganizations",
+        "allow_unrelated_changes",
+        "require_clean_worktree_for_rewrites",
+    ):
+        if key in git and not isinstance(git[key], bool):
+            raise ConfigError(f"Config key git.{key} must be a boolean.")
 
 
 def _validate_positive_int(section: Mapping[str, Any], key: str, *, minimum: int) -> None:

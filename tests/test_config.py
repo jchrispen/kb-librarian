@@ -27,6 +27,12 @@ def test_default_config_contains_phase_1_sections(tmp_path):
     assert "indexes:" in rendered
     assert "review:" in rendered
     assert "git:" in rendered
+    assert "auto_commit: false" in rendered
+    assert "commit_ingests: true" in rendered
+    assert "commit_reviews: true" in rendered
+    assert "commit_reindexes: false" in rendered
+    assert "commit_topic_reorganizations: true" in rendered
+    assert "allow_unrelated_changes: false" in rendered
     assert "privacy:" in rendered
     assert "hooks:" in rendered
     assert "session_start_ingest: false" in rendered
@@ -87,4 +93,12 @@ def test_validate_config_rejects_invalid_provider_retry_settings(tmp_path):
     config["providers"]["retry"]["base_delay_seconds"] = 1.0
     config["providers"]["retry"]["max_delay_seconds"] = 0.2
     with pytest.raises(ConfigError, match="max_delay_seconds"):
+        validate_config(config)
+
+
+def test_validate_config_rejects_non_boolean_git_policy(tmp_path):
+    config = default_config(tmp_path)
+    config["git"]["auto_commit"] = "yes"
+
+    with pytest.raises(ConfigError, match="git.auto_commit"):
         validate_config(config)

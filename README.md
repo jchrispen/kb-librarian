@@ -6,7 +6,7 @@ It stores durable knowledge as markdown files in a separate data directory, buil
 
 ## Status
 
-This repository currently ships the Phase 1 core workflow, Phase 2 daily-use ergonomics, Phase 3 hygiene/topic surfaces, and early Phase 4 robustness features (ingest lock/resume plus provider retry and golden corpus regression harness):
+This repository currently ships the Phase 1 core workflow, Phase 2 daily-use ergonomics, Phase 3 hygiene/topic surfaces, and Phase 4 robustness/polish features:
 
 - `kb init`
 - `kb add`
@@ -25,7 +25,7 @@ This repository currently ships the Phase 1 core workflow, Phase 2 daily-use erg
 - `kb usage`
 - `kb doctor`
 
-Planned later-phase features such as automation templates are documented in the design and implementation plans, but they are not part of the shipped CLI yet.
+Phase 5+ provider and retrieval extensions remain deferred backlog in the design and implementation plans.
 
 ## What It Does
 
@@ -42,6 +42,8 @@ Planned later-phase features such as automation templates are documented in the 
 - Supports clean-worktree-protected topic rename/promote operations and review-gated topic split/merge proposals
 - Retries transient provider failures with bounded backoff and logs retry/final-stop diagnostics
 - Includes deterministic golden corpus regression tests plus opt-in live-provider smoke coverage
+- Generates optional hook/scheduler templates without installing them automatically
+- Supports guarded opt-in git auto-commit for successful KB mutations
 
 ## Install
 
