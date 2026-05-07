@@ -10,7 +10,36 @@ Set the configured environment variable before running provider-backed commands:
 export ANTHROPIC_API_KEY=your_key_here
 ```
 
-If you want offline development behavior, reconfigure the provider manually to use the codebase's `mock` provider.
+If you want local LLM behavior without cloud credentials, route provider-backed operations to the configured Ollama provider:
+
+```yaml
+operations:
+  extract:    { provider: local, model: llama3.2 }
+  compact:    { provider: local, model: llama3.2 }
+  classify:   { provider: local, model: llama3.2 }
+  integrate:  { provider: local, model: llama3.2 }
+  synthesize: { provider: local, model: llama3.2 }
+```
+
+Then start Ollama and pull the routed model:
+
+```bash
+ollama pull llama3.2
+```
+
+For deterministic offline development or tests, reconfigure the provider manually to use the codebase's `mock` provider.
+
+## Local provider routes fail
+
+The local provider currently supports Ollama through `providers.local.base_url`.
+
+Check these in order:
+
+1. Confirm Ollama is running at the configured base URL
+2. Run `ollama pull <model>` for every model used by local operation routes
+3. Run `kb doctor --data-dir <path>` and inspect the Providers section
+4. Increase `providers.local.timeout_seconds` if the model is slow to respond
+5. Switch operation routes back to Anthropic if local generation is unavailable
 
 ## `kb search` or `kb context` returns nothing useful
 

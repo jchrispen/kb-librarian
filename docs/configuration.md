@@ -43,6 +43,10 @@ data_dir: ~/.kb/.library
 providers:
   anthropic:
     api_key_env: ANTHROPIC_API_KEY
+  local:
+    backend: ollama
+    base_url: http://127.0.0.1:11434
+    timeout_seconds: 120
   retry:
     max_attempts: 3
     base_delay_seconds: 0.25
@@ -116,6 +120,35 @@ export ANTHROPIC_API_KEY=your_key_here
 ```
 
 If the key is missing, provider-backed commands fail with an explicit error.
+
+The generated config also includes an opt-in local provider section for Ollama:
+
+```yaml
+providers:
+  local:
+    backend: ollama
+    base_url: http://127.0.0.1:11434
+    timeout_seconds: 120
+```
+
+Local provider routes are selected only by editing operation routes. For example:
+
+```yaml
+operations:
+  extract:    { provider: local, model: llama3.2 }
+  compact:    { provider: local, model: llama3.2 }
+  classify:   { provider: local, model: llama3.2 }
+  integrate:  { provider: local, model: llama3.2 }
+  synthesize: { provider: local, model: llama3.2 }
+```
+
+When all provider-backed operation routes use `provider: local`, cloud credentials are not required. Start Ollama and pull the configured model before running provider-backed commands:
+
+```bash
+ollama pull llama3.2
+```
+
+`kb doctor` checks local-provider reachability and reports missing routed models when local routes are configured.
 
 `providers.retry` controls bounded retry/backoff behavior for provider-backed operations:
 

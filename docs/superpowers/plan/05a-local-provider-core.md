@@ -2,7 +2,8 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
-Status: Pending
+Status: Complete
+Completed: 2026-05-07
 
 ## Goal
 
@@ -76,6 +77,20 @@ Add first-class local provider support so provider-backed operations can run wit
 - No cloud credentials are required when all routes use local provider.
 - Local backend failures are reported clearly through CLI and doctor.
 - Existing non-local provider behavior remains unchanged unless config switches routes.
+
+## Completion Record
+
+Implemented files:
+
+- `src/kb_librarian/providers.py`: added the Ollama-backed `LocalOllamaProvider`, local status diagnostics, and local provider construction.
+- `src/kb_librarian/config.py`: added default `providers.local` config and validation.
+- `src/kb_librarian/doctor.py`: added routed local-provider reachability/model diagnostics.
+- `tests/test_config.py`, `tests/test_providers.py`, `tests/test_ingest.py`, `tests/test_context.py`, `tests/test_compaction.py`, `tests/test_doctor.py`: added local config, adapter, doctor, and operation-route coverage.
+- `README.md`, `docs/configuration.md`, `docs/commands.md`, `docs/troubleshooting.md`: documented local-provider configuration and diagnostics.
+
+Verification:
+
+- `pytest tests/test_config.py tests/test_providers.py tests/test_ingest.py tests/test_context.py tests/test_compaction.py tests/test_doctor.py` -> 66 passed, 2 skipped.
 
 ## Out of Scope
 
