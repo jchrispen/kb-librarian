@@ -48,6 +48,12 @@ from kb_librarian.storage import (
     load_note_records,
     normalize_topic_for_path,
 )
+from kb_librarian.topic_mutations import (
+    promote_topics,
+    queue_topic_merge_proposal,
+    queue_topic_split_proposal,
+    rename_topic,
+)
 from kb_librarian.usage import (
     log_note_use,
     log_retrieval,
@@ -70,6 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_search_parser(subcommands)
     _add_get_parser(subcommands)
     _add_topics_parser(subcommands)
+    _add_topic_parser(subcommands)
     _add_ingest_parser(subcommands)
     _add_review_parser(subcommands)
     _add_compact_parser(subcommands)
@@ -235,6 +242,42 @@ def _add_topics_parser(subcommands: argparse._SubParsersAction[argparse.Argument
     parser.set_defaults(handler=_handle_topics)
 
 
+def _add_topic_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subcommands.add_parser(
+        "topic",
+        help="Mutate or propose topic reorganizations.",
+        description="Rename/promote topics directly, or create review-gated split/merge proposals.",
+    )
+    actions = parser.add_subparsers(dest="topic_action", metavar="<action>", required=True)
+
+    promote = actions.add_parser("promote", help="Move topic subtree(s) under a parent topic.")
+    promote.add_argument("topics", nargs="+", help="Existing topic path(s) to promote.")
+    promote.add_argument("--under", required=True, help="Parent topic to move under.")
+    promote.add_argument("--force", action="store_true", help="Allow mutation with a dirty git worktree.")
+    promote.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
+    promote.set_defaults(handler=_handle_topic_promote)
+
+    rename = actions.add_parser("rename", help="Rename one topic subtree.")
+    rename.add_argument("old", help="Existing topic path.")
+    rename.add_argument("new", help="New topic path.")
+    rename.add_argument("--force", action="store_true", help="Allow mutation with a dirty git worktree.")
+    rename.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
+    rename.set_defaults(handler=_handle_topic_rename)
+
+    split = actions.add_parser("split", help="Create a review-gated topic split proposal.")
+    split.add_argument("topic", help="Existing topic to split.")
+    split.add_argument("--into", nargs="+", required=True, help="Target topic paths.")
+    split.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
+    split.set_defaults(handler=_handle_topic_split)
+
+    merge = actions.add_parser("merge", help="Create a review-gated topic merge proposal.")
+    merge.add_argument("left", help="First source topic.")
+    merge.add_argument("right", help="Second source topic.")
+    merge.add_argument("--as", dest="target", required=True, help="Target merged topic path.")
+    merge.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
+    merge.set_defaults(handler=_handle_topic_merge)
+
+
 def _add_ingest_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = subcommands.add_parser(
         "ingest",
@@ -272,6 +315,7 @@ def _add_review_parser(subcommands: argparse._SubParsersAction[argparse.Argument
         help="Required for merge acceptance; explicitly approves candidate body append.",
     )
     parser.add_argument("--resolution-note", help="Resolution text for search-miss acceptance.")
+    parser.add_argument("--force", action="store_true", help="Allow accepted hygiene mutations with a dirty git worktree.")
     parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
     parser.set_defaults(handler=_handle_review)
 
@@ -386,6 +430,7 @@ def _handle_review(args: argparse.Namespace) -> int:
             note_id=args.note_id,
             append_body=bool(args.append_body),
             resolution_note=args.resolution_note,
+            force=bool(args.force),
         )
         print(result.message)
         return 0
@@ -811,6 +856,63 @@ def _handle_topics(args: argparse.Namespace) -> int:
         print(_render_topic_tree(topics, grouped, review_counts, review_available), end="")
     else:
         print(_render_topic_list(topics, grouped, review_counts, review_available), end="")
+    return 0
+
+
+def _handle_topic_rename(args: argparse.Namespace) -> int:
+    data_dir = resolve_data_dir(args.data_dir)
+    initialize_data_dir(data_dir)
+    result = rename_topic(
+        data_dir,
+        old_topic=str(args.old),
+        new_topic=str(args.new),
+        force=bool(args.force),
+    )
+    print(f"Renamed topic {args.old} -> {args.new}; moved {len(result.moved_notes)} note(s).")
+    return 0
+
+
+def _handle_topic_promote(args: argparse.Namespace) -> int:
+    data_dir = resolve_data_dir(args.data_dir)
+    initialize_data_dir(data_dir)
+    result = promote_topics(
+        data_dir,
+        topics=[str(topic) for topic in args.topics],
+        parent=str(args.under),
+        force=bool(args.force),
+    )
+    print(f"Promoted {len(args.topics)} topic(s) under {args.under}; moved {len(result.moved_notes)} note(s).")
+    return 0
+
+
+def _handle_topic_split(args: argparse.Namespace) -> int:
+    data_dir = resolve_data_dir(args.data_dir)
+    initialize_data_dir(data_dir)
+    result = queue_topic_split_proposal(
+        data_dir,
+        topic=str(args.topic),
+        target_topics=[str(topic) for topic in args.into],
+    )
+    verb = "Created" if result.created else "Existing"
+    print(f"{verb} topic split proposal {result.review_item_id}.")
+    print(f"moves: {len(result.moves)}")
+    print(f"Review: kb review explain {result.review_item_id} --data-dir {data_dir}")
+    return 0
+
+
+def _handle_topic_merge(args: argparse.Namespace) -> int:
+    data_dir = resolve_data_dir(args.data_dir)
+    initialize_data_dir(data_dir)
+    result = queue_topic_merge_proposal(
+        data_dir,
+        left_topic=str(args.left),
+        right_topic=str(args.right),
+        target_topic=str(args.target),
+    )
+    verb = "Created" if result.created else "Existing"
+    print(f"{verb} topic merge proposal {result.review_item_id}.")
+    print(f"moves: {len(result.moves)}")
+    print(f"Review: kb review explain {result.review_item_id} --data-dir {data_dir}")
     return 0
 
 

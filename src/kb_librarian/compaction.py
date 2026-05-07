@@ -6,10 +6,14 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from kb_librarian.errors import KBLibrarianError
+from kb_librarian.indexing import reindex_data_dir
+from kb_librarian.mutations import atomic_write_note, require_clean_worktree
+from kb_librarian.notes import Note, generate_note_id
 from kb_librarian.providers import (
     CompactionDraft,
     operation_route,
@@ -21,7 +25,15 @@ from kb_librarian.review import (
     queue_compaction_cluster_review_item,
     queue_compaction_proposal_review_item,
 )
-from kb_librarian.storage import NoteRecord, ensure_unique_note_ids, load_note_records, normalize_topic_for_path
+from kb_librarian.storage import (
+    NoteRecord,
+    canonical_note_path,
+    ensure_unique_note_ids,
+    existing_note_ids,
+    load_note_records,
+    normalize_topic_for_path,
+)
+from kb_librarian.usage import note_usage_counts
 
 
 MIN_CLUSTER_NOTES = 2
@@ -78,6 +90,16 @@ class CompactionProposalResult:
     source_note_ids: list[str]
     draft: CompactionDraft
     created: bool
+
+
+@dataclass(frozen=True)
+class CompactionApplyResult:
+    canonical_note_id: str
+    canonical_path: Path
+    superseded_note_ids: list[str]
+    archived_note_ids: list[str]
+    deleted_note_ids: list[str]
+    kept_note_ids: list[str]
 
 
 def scan_compaction_clusters(data_dir: Path, *, config: Mapping[str, Any]) -> CompactionScanResult:
@@ -241,6 +263,89 @@ def draft_compaction_proposal(
     )
 
 
+def apply_compaction_review_item(
+    data_dir: Path,
+    item: Mapping[str, Any],
+    *,
+    force: bool = False,
+) -> CompactionApplyResult:
+    """Apply an accepted compaction proposal and rebuild generated indexes."""
+
+    payload = item.get("payload", {})
+    if not isinstance(payload, Mapping) or payload.get("kind") != "proposal":
+        raise KBLibrarianError("Only compaction proposal review items can be accepted.")
+
+    require_clean_worktree(
+        data_dir,
+        force=force,
+        operation=f"Accepting compaction item {item.get('id')}",
+    )
+
+    records = _eligible_or_supersedable_records(load_note_records(data_dir, validate=True))
+    ensure_unique_note_ids(records)
+    by_id = {record.note_id: record for record in records}
+    source_note_ids = _payload_note_ids(payload, item)
+    if len(source_note_ids) < MIN_CLUSTER_NOTES:
+        raise KBLibrarianError("Compaction proposal requires at least two source notes.")
+
+    missing = [note_id for note_id in source_note_ids if note_id not in by_id]
+    if missing:
+        raise KBLibrarianError(f"Compaction proposal references missing notes: {', '.join(missing)}")
+
+    canonical = _canonical_note_from_payload(
+        payload,
+        source_note_ids=source_note_ids,
+        existing_ids=existing_note_ids(records),
+    )
+    canonical_path = canonical_note_path(
+        data_dir,
+        str(canonical.frontmatter["topic"]),
+        str(canonical.frontmatter["id"]),
+    )
+    if canonical_path.exists():
+        raise KBLibrarianError(f"Canonical compaction destination already exists: {canonical_path}")
+
+    atomic_write_note(canonical_path, canonical)
+    usage_counts = note_usage_counts(data_dir)
+    superseded: list[str] = []
+    archived: list[str] = []
+    deleted: list[str] = []
+    kept: list[str] = []
+    dispositions = _dispositions_by_note_id(payload)
+
+    for source_note_id in source_note_ids:
+        record = by_id[source_note_id]
+        recommendation = dispositions.get(source_note_id, {}).get("recommendation", "supersede")
+        recommendation = str(recommendation).strip().lower()
+        if recommendation in {"keep", "review"}:
+            kept.append(source_note_id)
+            continue
+        if recommendation == "delete" and _can_delete_source_note(canonical, source_note_id, usage_counts):
+            record.path.unlink()
+            deleted.append(source_note_id)
+            continue
+        status = "archived" if recommendation in {"archive", "delete"} else "superseded"
+        _mark_source_note(
+            record,
+            status=status,
+            superseded_by=str(canonical.frontmatter["id"]),
+        )
+        if status == "archived":
+            archived.append(source_note_id)
+        else:
+            superseded.append(source_note_id)
+
+    reindex_data_dir(data_dir)
+    return CompactionApplyResult(
+        canonical_note_id=str(canonical.frontmatter["id"]),
+        canonical_path=canonical_path,
+        superseded_note_ids=superseded,
+        archived_note_ids=archived,
+        deleted_note_ids=deleted,
+        kept_note_ids=kept,
+    )
+
+
 def resolve_compaction_target(data_dir: Path, records: list[NoteRecord], target: str) -> tuple[list[NoteRecord], str]:
     """Resolve a topic, compaction review item ID, or cluster ID to notes."""
 
@@ -292,6 +397,123 @@ def _eligible_records(records: Iterable[NoteRecord]) -> list[NoteRecord]:
             continue
         eligible.append(record)
     return sorted(eligible, key=lambda item: item.note_id)
+
+
+def _eligible_or_supersedable_records(records: Iterable[NoteRecord]) -> list[NoteRecord]:
+    eligible: list[NoteRecord] = []
+    for record in records:
+        status = str(record.note.frontmatter.get("status", ""))
+        if status == "archived":
+            continue
+        eligible.append(record)
+    return sorted(eligible, key=lambda item: item.note_id)
+
+
+def _canonical_note_from_payload(
+    payload: Mapping[str, Any],
+    *,
+    source_note_ids: list[str],
+    existing_ids: set[str],
+) -> Note:
+    draft_frontmatter = payload.get("frontmatter")
+    if not isinstance(draft_frontmatter, Mapping):
+        raise KBLibrarianError("Compaction proposal is missing proposed frontmatter.")
+    body = str(payload.get("body", "")).strip()
+    if not body:
+        raise KBLibrarianError("Compaction proposal is missing proposed body markdown.")
+
+    today = date.today().isoformat()
+    title = str(draft_frontmatter.get("title") or "Canonical compacted note").strip()
+    topic = str(draft_frontmatter.get("topic") or "general").strip()
+    knowledge_type = str(draft_frontmatter.get("knowledge_type") or "technique").strip()
+    note_id = generate_note_id(title, today, existing_ids=existing_ids)
+    sources = _coerce_sources(draft_frontmatter.get("sources"))
+    sources.append(
+        {
+            "type": "compaction",
+            "ref": "review/pending-compaction.md",
+            "source_note_ids": source_note_ids,
+        }
+    )
+    frontmatter: dict[str, Any] = {
+        **dict(draft_frontmatter),
+        "id": note_id,
+        "title": title,
+        "summary": str(draft_frontmatter.get("summary") or title).strip() or title,
+        "topic": topic,
+        "created": today,
+        "updated": today,
+        "knowledge_type": knowledge_type,
+        "status": "active",
+        "confidence": str(draft_frontmatter.get("confidence") or "medium").strip() or "medium",
+        "basis": _coerce_string_list(draft_frontmatter.get("basis")) or ["accepted compaction review"],
+        "sources": sources,
+        "retrieval_phrases": _coerce_string_list(draft_frontmatter.get("retrieval_phrases")) or [title.lower()],
+        "agent_use": _coerce_string_list(draft_frontmatter.get("agent_use")),
+        "applies_when": _coerce_string_list(draft_frontmatter.get("applies_when")),
+        "does_not_apply_when": _coerce_string_list(draft_frontmatter.get("does_not_apply_when")),
+        "failure_modes": _coerce_string_list(draft_frontmatter.get("failure_modes")),
+        "staleness_risk": str(draft_frontmatter.get("staleness_risk") or "medium").strip() or "medium",
+        "reviewed_by_user": True,
+        "disputes": _coerce_string_list(draft_frontmatter.get("disputes")),
+        "tags": _coerce_string_list(draft_frontmatter.get("tags")) or [normalize_topic_for_path(topic)],
+    }
+    note = Note(frontmatter=frontmatter, body=body.rstrip("\n") + "\n")
+    note.validate()
+    return note
+
+
+def _coerce_sources(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    sources: list[dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, Mapping):
+            sources.append(dict(item))
+    return sources
+
+
+def _coerce_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _dispositions_by_note_id(payload: Mapping[str, Any]) -> dict[str, dict[str, str]]:
+    raw = payload.get("dispositions")
+    if not isinstance(raw, list):
+        return {}
+    dispositions: dict[str, dict[str, str]] = {}
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        note_id = str(item.get("note_id", "")).strip()
+        if not note_id:
+            continue
+        dispositions[note_id] = {
+            "recommendation": str(item.get("recommendation", "")).strip().lower(),
+            "rationale": str(item.get("rationale", "")).strip(),
+        }
+    return dispositions
+
+
+def _can_delete_source_note(note: Note, source_note_id: str, usage_counts: Mapping[str, int]) -> bool:
+    if int(usage_counts.get(source_note_id, 0)) > 0:
+        return False
+    rendered = note.to_markdown()
+    return source_note_id not in rendered
+
+
+def _mark_source_note(record: NoteRecord, *, status: str, superseded_by: str) -> None:
+    frontmatter = dict(record.note.frontmatter)
+    frontmatter["status"] = status
+    frontmatter["updated"] = date.today().isoformat()
+    frontmatter["superseded_by"] = superseded_by
+    if status == "superseded":
+        frontmatter["reviewed_by_user"] = True
+    note = Note(frontmatter=frontmatter, body=record.note.body)
+    note.validate()
+    atomic_write_note(record.path, note)
 
 
 def _duplicate_cluster_threshold(config: Mapping[str, Any]) -> int:

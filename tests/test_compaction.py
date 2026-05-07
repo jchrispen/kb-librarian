@@ -16,7 +16,7 @@ from kb_librarian.errors import KBLibrarianError, ProviderError
 from kb_librarian.init import initialize_data_dir
 from kb_librarian.notes import Note, write_note
 from kb_librarian.providers import validate_compaction_payload
-from kb_librarian.review import queue_compaction_cluster_review_item, reject_review_item, review_state_path
+from kb_librarian.review import accept_review_item, queue_compaction_cluster_review_item, reject_review_item, review_state_path
 from kb_librarian.storage import canonical_note_path, load_note_records
 
 
@@ -228,6 +228,43 @@ def test_draft_compaction_proposal_with_mock_provider_queues_review_item(tmp_pat
     rendered = (tmp_path / "review" / "pending-compaction.md").read_text(encoding="utf-8")
     assert "- kind: proposal" in rendered
     assert "- proposed_body:" in rendered
+
+
+def test_accept_compaction_proposal_creates_canonical_note_and_supersedes_sources(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    config["providers"]["mock"] = {}
+    config["operations"]["compact"] = {"provider": "mock", "model": "mock-compact"}
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+    _write_note(
+        tmp_path,
+        note_id="2026-05-05-agent-context-a",
+        title="Agent context A",
+        summary="Use context before coding.",
+    )
+    _write_note(
+        tmp_path,
+        note_id="2026-05-05-agent-context-b",
+        title="Agent context B",
+        summary="Cite context sources.",
+    )
+
+    proposal = draft_compaction_proposal(tmp_path, config=config, target="agent-systems")
+    accepted = accept_review_item(tmp_path, proposal.review_item_id)
+
+    assert accepted.changed is True
+    assert "Accepted compaction into note" in accepted.message
+    records = load_note_records(tmp_path)
+    by_id = {record.note_id: record for record in records}
+    canonical_ids = sorted(set(by_id) - set(proposal.source_note_ids))
+    assert len(canonical_ids) == 1
+    canonical_id = canonical_ids[0]
+    assert by_id[canonical_id].note.frontmatter["sources"][0]["source_note_ids"] == proposal.source_note_ids
+    for source_id in proposal.source_note_ids:
+        frontmatter = by_id[source_id].note.frontmatter
+        assert frontmatter["status"] == "superseded"
+        assert frontmatter["superseded_by"] == canonical_id
+    assert (tmp_path / ".kb" / "fts.sqlite").is_file()
 
 
 def test_validate_compaction_payload_requires_dispositions_for_all_sources():

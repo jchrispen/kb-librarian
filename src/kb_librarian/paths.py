@@ -22,6 +22,7 @@ REVIEW_QUEUE_FILES = (
     "review/pending-classification.md",
     "review/pending-merge.md",
     "review/pending-compaction.md",
+    "review/pending-topic.md",
     "review/disputes.md",
     "review/stale.md",
     "review/orphans.md",

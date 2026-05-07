@@ -92,6 +92,16 @@ QUEUE_DEFINITIONS: dict[str, QueueDefinition] = {
         proposed_action="draft or review compaction proposal",
         order=45,
     ),
+    "topic": QueueDefinition(
+        queue="topic",
+        count_key="topic",
+        id_prefix="topic",
+        file_name="pending-topic.md",
+        file_title="Pending Topic Reorganization",
+        priority="medium",
+        proposed_action="review topic reorganization proposal",
+        order=46,
+    ),
     "stale": QueueDefinition(
         queue="stale",
         count_key="stale",
@@ -621,6 +631,7 @@ def accept_review_item(
     note_id: str | None = None,
     append_body: bool = False,
     resolution_note: str | None = None,
+    force: bool = False,
 ) -> ReviewMutationResult:
     state = ensure_review_state(data_dir, render=False)
     item = _find_item_by_id(state, item_id)
@@ -638,6 +649,7 @@ def accept_review_item(
         note_id=note_id,
         append_body=append_body,
         resolution_note=resolution_note,
+        force=force,
     )
     _transition_item(
         item,
@@ -803,6 +815,7 @@ def render_review_summary(
         f"dispute: {counts.get('dispute', 0)}",
         f"searchmiss: {counts.get('searchmiss', 0)}",
         f"compaction: {counts.get('compaction', 0)}",
+        f"topic: {counts.get('topic', 0)}",
         f"stale: {counts.get('stale', 0)}",
         f"orphan: {counts.get('orphan', 0)}",
         f"low_utility: {counts.get('low_utility', 0)}",
@@ -1251,6 +1264,30 @@ def _render_item_markdown(item: Mapping[str, Any]) -> list[str]:
         body = payload.get("body")
         if isinstance(body, str) and body.strip():
             lines.extend(["- proposed_body:", "```markdown", body.rstrip("\n"), "```"])
+    elif queue == "topic":
+        _extend_if_present(lines, "- kind", payload.get("kind"))
+        _extend_if_present(lines, "- source_topic", payload.get("source_topic"))
+        source_topics = payload.get("source_topics")
+        if isinstance(source_topics, list) and source_topics:
+            _extend_if_present(lines, "- source_topics", ", ".join(str(topic) for topic in source_topics))
+        target_topics = payload.get("target_topics")
+        if isinstance(target_topics, list) and target_topics:
+            _extend_if_present(lines, "- target_topics", ", ".join(str(topic) for topic in target_topics))
+        _extend_if_present(lines, "- target_topic", payload.get("target_topic"))
+        moves = payload.get("moves")
+        if isinstance(moves, list) and moves:
+            lines.append("- moves:")
+            for move in moves[:25]:
+                if not isinstance(move, Mapping):
+                    continue
+                lines.append(
+                    "  - {note_id}: {from_topic} -> {to_topic} ({reason})".format(
+                        note_id=move.get("note_id"),
+                        from_topic=move.get("from_topic"),
+                        to_topic=move.get("to_topic"),
+                        reason=move.get("reason", ""),
+                    )
+                )
     elif queue == "stale":
         _extend_if_present(lines, "- note_id", payload.get("note_id"))
         _extend_if_present(lines, "- updated", payload.get("updated"))
@@ -1326,6 +1363,8 @@ def _item_summary(item: Mapping[str, Any]) -> str:
             "query",
             "reason",
             "rationale",
+            "source_topic",
+            "target_topic",
         ):
             value = str(payload.get(key, "")).strip()
             if value:
@@ -1486,6 +1525,7 @@ def _apply_accept_action(
     note_id: str | None,
     append_body: bool,
     resolution_note: str | None,
+    force: bool,
 ) -> str:
     queue = str(item["queue"])
     if queue == "classification":
@@ -1502,6 +1542,10 @@ def _apply_accept_action(
         return _accept_dispute_item(data_dir, item)
     if queue == "searchmiss":
         return _accept_searchmiss_item(item, resolution_note=resolution_note)
+    if queue == "compaction":
+        return _accept_compaction_item(data_dir, item, force=force)
+    if queue == "topic":
+        return _accept_topic_item(data_dir, item, force=force)
     raise ReviewStateError(
         f"Accept is not supported for queue {queue!r} in this milestone. Use reject/defer instead."
     )
@@ -1608,6 +1652,26 @@ def _accept_searchmiss_item(item: dict[str, Any], *, resolution_note: str | None
     payload["resolution_note"] = text
     payload["resolved_at"] = datetime.now().isoformat(timespec="seconds")
     return "Accepted search-miss item with a resolution note."
+
+
+def _accept_compaction_item(data_dir: Path, item: dict[str, Any], *, force: bool) -> str:
+    from kb_librarian.compaction import apply_compaction_review_item
+
+    result = apply_compaction_review_item(data_dir, item, force=force)
+    return (
+        f"Accepted compaction into note {result.canonical_note_id}; "
+        f"superseded={len(result.superseded_note_ids)}, "
+        f"archived={len(result.archived_note_ids)}, "
+        f"deleted={len(result.deleted_note_ids)}, "
+        f"kept={len(result.kept_note_ids)}."
+    )
+
+
+def _accept_topic_item(data_dir: Path, item: dict[str, Any], *, force: bool) -> str:
+    from kb_librarian.topic_mutations import apply_topic_review_item
+
+    result = apply_topic_review_item(data_dir, item, force=force)
+    return f"Accepted topic proposal; moved {len(result.moved_notes)} note(s)."
 
 
 def _create_note_from_classification(

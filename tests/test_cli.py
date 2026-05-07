@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -33,6 +34,10 @@ def run_cli(
         capture_output=True,
         check=False,
     )
+
+
+def run_git(cwd: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=cwd, text=True, capture_output=True, check=True)
 
 
 def test_kb_help_smoke():
@@ -284,6 +289,100 @@ def test_kb_reindex_scan_clusters_and_compact_smoke(tmp_path):
     review_result = run_cli("review", "--data-dir", str(tmp_path))
     assert review_result.returncode == 0
     assert "compaction: 2" in review_result.stdout
+
+
+def test_kb_review_accept_compaction_proposal_smoke_in_git_repo(tmp_path):
+    if shutil.which("git") is None:
+        return
+
+    init_result = run_cli("init", "--data-dir", str(tmp_path))
+    assert init_result.returncode == 0
+    config = default_config(tmp_path)
+    config["providers"]["mock"] = {}
+    config["operations"]["compact"] = {"provider": "mock", "model": "mock-compact"}
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    for suffix in ("a", "b"):
+        source = tmp_path / f"context-{suffix}.md"
+        source.write_text(
+            "# Agent context retrieval\n\nUse compact context and cite KB sources.\n",
+            encoding="utf-8",
+        )
+        add_result = run_cli(
+            "add",
+            "--data-dir",
+            str(tmp_path),
+            "--topic",
+            "agent-systems",
+            "--type",
+            "heuristic",
+            "--from-file",
+            str(source),
+        )
+        assert add_result.returncode == 0
+
+    run_git(tmp_path, "init")
+    run_git(tmp_path, "config", "user.email", "test@example.com")
+    run_git(tmp_path, "config", "user.name", "Test User")
+    run_git(tmp_path, "add", ".")
+    run_git(tmp_path, "commit", "-m", "initial kb")
+
+    compact_result = run_cli("compact", "agent-systems", "--data-dir", str(tmp_path))
+    assert compact_result.returncode == 0
+    match = re.search(r"Created compaction proposal (compaction-\d{4}-\d{2}-\d{2}-\d{3})", compact_result.stdout)
+    assert match is not None
+    item_id = match.group(1)
+    run_git(tmp_path, "add", ".")
+    run_git(tmp_path, "commit", "-m", "compaction proposal")
+
+    accept_result = run_cli("review", "accept", item_id, "--data-dir", str(tmp_path))
+
+    assert accept_result.returncode == 0
+    assert "Accepted compaction into note" in accept_result.stdout
+    source_text = "\n".join(path.read_text(encoding="utf-8") for path in (tmp_path / "topics" / "agent-systems").glob("*.md"))
+    assert "status: superseded" in source_text
+
+
+def test_kb_topic_split_reject_smoke(tmp_path):
+    init_result = run_cli("init", "--data-dir", str(tmp_path))
+    assert init_result.returncode == 0
+
+    for title in ("Retrieval flow", "Review checklist"):
+        source = tmp_path / f"{title.lower().replace(' ', '-')}.md"
+        source.write_text(f"# {title}\n\nBody.\n", encoding="utf-8")
+        add_result = run_cli(
+            "add",
+            "--data-dir",
+            str(tmp_path),
+            "--topic",
+            "mixed",
+            "--type",
+            "technique",
+            "--from-file",
+            str(source),
+        )
+        assert add_result.returncode == 0
+
+    split_result = run_cli(
+        "topic",
+        "split",
+        "mixed",
+        "--into",
+        "agent-systems/retrieval",
+        "agent-systems/review",
+        "--data-dir",
+        str(tmp_path),
+    )
+    assert split_result.returncode == 0
+    match = re.search(r"Created topic split proposal (topic-\d{4}-\d{2}-\d{2}-\d{3})", split_result.stdout)
+    assert match is not None
+    item_id = match.group(1)
+
+    reject_result = run_cli("review", "reject", item_id, "--data-dir", str(tmp_path))
+
+    assert reject_result.returncode == 0
+    assert "rejected" in reject_result.stdout.lower()
+    assert (tmp_path / "review" / "rejected" / f"{item_id}.md").is_file()
 
 
 def test_kb_add_without_direct_metadata_queues_raw(tmp_path):
