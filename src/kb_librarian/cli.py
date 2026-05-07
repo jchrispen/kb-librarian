@@ -27,7 +27,7 @@ from kb_librarian.errors import (
 )
 from kb_librarian.hygiene import flag_suspect_note
 from kb_librarian.indexing import ReindexResult, group_records_for_indexing, reindex_data_dir
-from kb_librarian.init import initialize_data_dir, render_preamble_guidance
+from kb_librarian.init import initialize_data_dir, render_hooks_guidance, render_preamble_guidance
 from kb_librarian.ingest import ingest, ingest_report_payload, render_report
 from kb_librarian.notes import KNOWLEDGE_TYPES, Note, body_template, generate_note_id, parse_note_text, write_note
 from kb_librarian.review import (
@@ -379,6 +379,7 @@ def _handle_init(args: argparse.Namespace) -> int:
         print("Already initialized; no files changed.")
     if args.hooks:
         print(render_preamble_guidance(data_dir), end="")
+        print(render_hooks_guidance(data_dir), end="")
     return 0
 
 

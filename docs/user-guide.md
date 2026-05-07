@@ -34,7 +34,14 @@ Install or refresh the agent-facing preamble:
 kb init --hooks --data-dir /path/to/kb
 ```
 
-`--hooks` writes the tool-managed `PREAMBLE.md` and prints the path to include in agent session instructions. It does not edit external agent configuration files.
+`--hooks` writes the tool-managed `PREAMBLE.md`, generates optional session-start/scheduler templates under `.kb/hooks/`, and prints manual installation guidance. It does not edit external agent configuration files or register external hooks/jobs.
+
+Generated templates include:
+
+- `.kb/hooks/session-start.sh`
+- `.kb/hooks/cron.template`
+- `.kb/hooks/launchd.template.plist`
+- `.kb/hooks/windows-task-scheduler.template.ps1`
 
 This creates:
 

@@ -8,7 +8,7 @@ Initialize a local KB data directory without overwriting existing content.
 kb init [--data-dir <path>] [--hooks]
 ```
 
-`--hooks` creates or refreshes the tool-managed `PREAMBLE.md` and prints instructions for including that file in agent session instructions. It does not edit external agent configuration files.
+`--hooks` creates or refreshes the tool-managed `PREAMBLE.md`, generates optional automation templates under `.kb/hooks/`, and prints manual installation instructions. It does not edit external agent configuration files or register external hooks/jobs automatically.
 
 ## `kb add`
 
@@ -236,7 +236,7 @@ kb usage [--since <duration>] [--note <id>] [--data-dir <path>]
 
 ## Current Command Surface
 
-The current shipped CLI includes the full Phase 1-3 command surface plus Phase 4a-4c robustness behavior on existing commands (ingest lock/resume, provider retry/backoff, golden corpus checks, and PDF/HTML ingest). Later Phase 4 additions (hook templates and auto-commit policy) remain planned work.
+The current shipped CLI includes the full Phase 1-3 command surface plus Phase 4a-4d robustness behavior on existing commands (ingest lock/resume, provider retry/backoff, golden corpus checks, PDF/HTML ingest, and opt-in hook/scheduler templates). Optional auto-commit policy remains planned work.
 
 ## Golden Corpus Regression Harness
 

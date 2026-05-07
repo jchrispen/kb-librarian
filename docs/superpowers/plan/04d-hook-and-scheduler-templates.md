@@ -2,6 +2,8 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
+Status: Complete (2026-05-07)
+
 ## Goal
 
 Provide optional automation templates without changing the default manual posture. At the end of this milestone, the KB can generate session-start and scheduled-run templates under tool-managed directories and print explicit installation guidance without modifying external tools automatically.
@@ -75,3 +77,17 @@ Provide optional automation templates without changing the default manual postur
 - Auto-registration of hooks or scheduled jobs.
 - Auto-commit policy.
 - Parser and retry logic beyond any commands referenced by templates.
+
+## Completion Record (2026-05-07)
+
+- Implemented files:
+  - `src/kb_librarian/init.py`
+  - `src/kb_librarian/cli.py`
+  - `tests/test_init.py`
+  - `tests/test_cli.py`
+  - `docs/commands.md`
+  - `docs/user-guide.md`
+  - `docs/configuration.md`
+- Verification:
+  - `pytest -q tests/test_init.py tests/test_cli.py`
+  - Result: `30 passed`

@@ -137,6 +137,8 @@ def test_kb_init_hooks_installs_agent_preamble_guidance(tmp_path):
     assert result.returncode == 0
     assert "Agent preamble installed at" in result.stdout
     assert "Include that file in agent session instructions" in result.stdout
+    assert "Hook templates generated under" in result.stdout
+    assert "does not install or register external hooks/jobs" in result.stdout
     assert "kb context" in preamble
     assert "kb explore" in preamble
     assert second.returncode == 0

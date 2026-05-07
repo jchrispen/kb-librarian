@@ -178,4 +178,4 @@ hooks:
   session_start_ingest: true
 ```
 
-It also creates or refreshes the tool-managed `PREAMBLE.md` and prints instructions for including it in agent session instructions. It does not install external hooks, edit external agent configuration files, or enable automation.
+It also creates or refreshes the tool-managed `PREAMBLE.md`, generates optional templates under `.kb/hooks/`, and prints instructions for manual installation. It does not install external hooks, edit external agent configuration files, or enable automation.

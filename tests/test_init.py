@@ -5,7 +5,12 @@ import json
 import yaml
 
 from kb_librarian.config import default_config, write_config_file
-from kb_librarian.init import LEGACY_PREAMBLE_CONTENT, initialize_data_dir, render_preamble
+from kb_librarian.init import (
+    HOOK_TEMPLATES,
+    LEGACY_PREAMBLE_CONTENT,
+    initialize_data_dir,
+    render_preamble,
+)
 from kb_librarian.paths import DIRECTORIES, LOG_FILES, REVIEW_QUEUE_FILES, REVIEW_STATE_FILE, ROOT_FILES, STATE_FILES
 
 
@@ -91,5 +96,35 @@ def test_initialize_data_dir_hooks_preserves_user_preamble(tmp_path):
 
     created = initialize_data_dir(tmp_path, hooks=True)
 
-    assert created == []
+    assert created
     assert preamble_path.read_text(encoding="utf-8") == user_preamble
+    for rel_path in HOOK_TEMPLATES:
+        assert (tmp_path / rel_path) in created
+
+
+def test_initialize_data_dir_hooks_generates_templates(tmp_path):
+    initialize_data_dir(tmp_path, hooks=True)
+    for rel_path in HOOK_TEMPLATES:
+        assert (tmp_path / rel_path).is_file()
+
+    session_start = (tmp_path / ".kb" / "hooks" / "session-start.sh").read_text(encoding="utf-8")
+    assert str(tmp_path) in session_start
+    assert "kb doctor --data-dir" in session_start
+    assert "kb context" in session_start
+
+    cron = (tmp_path / ".kb" / "hooks" / "cron.template").read_text(encoding="utf-8")
+    assert "kb ingest --data-dir" in cron
+    assert "kb reindex --scan-clusters --data-dir" in cron
+    assert "kb doctor --data-dir" in cron
+
+
+def test_initialize_data_dir_hooks_templates_are_idempotent(tmp_path):
+    initialize_data_dir(tmp_path, hooks=True)
+    hooks_dir = tmp_path / ".kb" / "hooks"
+    before = {path.name: path.read_text(encoding="utf-8") for path in hooks_dir.iterdir()}
+
+    created = initialize_data_dir(tmp_path, hooks=True)
+    after = {path.name: path.read_text(encoding="utf-8") for path in hooks_dir.iterdir()}
+
+    assert created == []
+    assert before == after
