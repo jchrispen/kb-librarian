@@ -7,6 +7,7 @@ from kb_librarian.doctor import render_doctor_report, render_self_test_report, r
 from kb_librarian.indexing import reindex_data_dir
 from kb_librarian.init import initialize_data_dir
 from kb_librarian.notes import Note, write_note
+from kb_librarian.providers import LocalProviderStatus
 from kb_librarian.storage import canonical_note_path
 
 
@@ -144,3 +145,42 @@ def test_doctor_reports_auto_commit_enabled_outside_git(tmp_path):
 
     assert report.error_count == 0
     assert "auto-commit-no-worktree" in rendered
+
+
+def test_doctor_reports_local_provider_unreachable_when_routed(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    for operation in config["operations"]:
+        config["operations"][operation] = {"provider": "local", "model": "llama3.2"}
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    monkeypatch.setattr(
+        "kb_librarian.doctor.local_provider_status",
+        lambda *args, **kwargs: LocalProviderStatus(False, [], "Ollama backend is unreachable."),
+    )
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 1
+    assert "local-provider-unreachable" in rendered
+    assert "Start Ollama" in rendered
+
+
+def test_doctor_reports_local_provider_reachable_when_routed(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    for operation in config["operations"]:
+        config["operations"][operation] = {"provider": "local", "model": "llama3.2"}
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    monkeypatch.setattr(
+        "kb_librarian.doctor.local_provider_status",
+        lambda *args, **kwargs: LocalProviderStatus(True, ["llama3.2:latest"], "Ollama backend is reachable."),
+    )
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 0
+    assert "local-provider-reachable" in rendered

@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import urllib.error
 
 import pytest
 
 from kb_librarian.errors import ProviderError
 from kb_librarian.providers import (
+    LocalOllamaProvider,
     MockProvider,
-    validate_integration_payload,
+    local_provider_status,
     parse_json_response,
+    provider_from_config,
     validate_classification_payload,
     validate_extraction_payload,
+    validate_integration_payload,
 )
 
 
@@ -164,3 +169,105 @@ def test_validate_integration_payload_rejects_invalid_targets():
                 "rationale": "missing target",
             }
         )
+
+
+class _FakeResponse:
+    def __init__(self, payload: object) -> None:
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self) -> bytes:
+        return json.dumps(self.payload).encode("utf-8")
+
+
+def test_provider_from_config_builds_local_ollama_provider():
+    provider = provider_from_config(
+        {
+            "providers": {
+                "local": {
+                    "backend": "ollama",
+                    "base_url": "http://127.0.0.1:11434",
+                    "timeout_seconds": 3,
+                }
+            }
+        },
+        "local",
+    )
+
+    assert isinstance(provider, LocalOllamaProvider)
+
+
+def test_local_ollama_provider_maps_structured_response(monkeypatch):
+    requests = []
+
+    def fake_urlopen(request, timeout):  # noqa: ANN001
+        requests.append((request.full_url, json.loads(request.data.decode("utf-8")), timeout))
+        return _FakeResponse(
+            {
+                "response": json.dumps(
+                    {
+                        "candidates": [
+                            {
+                                "title": "Local provider note",
+                                "summary": "Local provider extracts structured notes.",
+                                "knowledge_type": "technique",
+                                "body": "## Core idea\n\nUse local providers.\n",
+                                "retrieval_phrases": ["local provider"],
+                                "tags": ["local"],
+                                "confidence": "high",
+                                "utility_score": "high",
+                            }
+                        ]
+                    }
+                )
+            }
+        )
+
+    monkeypatch.setattr("kb_librarian.providers.urllib.request.urlopen", fake_urlopen)
+
+    provider = LocalOllamaProvider(base_url="http://localhost:11434/", timeout_seconds=9)
+    result = provider.extract_candidates(
+        text="# Local provider\n\nUse local providers for sensitive notes.",
+        source_path=Path("raw/local.md"),
+        max_notes=3,
+        model="llama3.2",
+    )
+
+    assert result.candidates[0].title == "Local provider note"
+    assert requests[0][0] == "http://localhost:11434/api/generate"
+    assert requests[0][1]["format"] == "json"
+    assert requests[0][1]["stream"] is False
+    assert requests[0][2] == 9
+
+
+def test_local_ollama_provider_maps_transport_error(monkeypatch):
+    def fake_urlopen(request, timeout):  # noqa: ANN001
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr("kb_librarian.providers.urllib.request.urlopen", fake_urlopen)
+    provider = LocalOllamaProvider(base_url="http://localhost:11434")
+
+    with pytest.raises(ProviderError, match="Start Ollama"):
+        provider.synthesize_context(task="x", selected_notes=[], model="llama3.2")
+
+
+def test_local_provider_status_reports_models(monkeypatch):
+    def fake_urlopen(request, timeout):  # noqa: ANN001
+        assert request.full_url == "http://localhost:11434/api/tags"
+        assert timeout == 2
+        return _FakeResponse({"models": [{"name": "llama3.2:latest"}]})
+
+    monkeypatch.setattr("kb_librarian.providers.urllib.request.urlopen", fake_urlopen)
+
+    status = local_provider_status(
+        {"backend": "ollama", "base_url": "http://localhost:11434"},
+        timeout_seconds=2,
+    )
+
+    assert status.reachable is True
+    assert status.models == ["llama3.2:latest"]

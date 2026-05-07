@@ -80,6 +80,13 @@ class CompactionDraft:
     diff_summary: str
 
 
+@dataclass(frozen=True)
+class LocalProviderStatus:
+    reachable: bool
+    models: list[str]
+    message: str
+
+
 class LLMProvider(Protocol):
     """Provider operations needed across Phase 1 milestones."""
 
@@ -170,8 +177,53 @@ def provider_from_config(
                 "or configure ingest to use the mock provider."
             )
         return AnthropicProvider(api_key=api_key)
+    if provider_name == "local":
+        backend = str(provider_config.get("backend", "ollama")).strip() or "ollama"
+        if backend != "ollama":
+            raise ProviderError("Config key providers.local.backend must be 'ollama'.")
+        base_url = provider_config.get("base_url")
+        if not isinstance(base_url, str) or not base_url.strip():
+            raise ProviderError("Config key providers.local.base_url is required.")
+        timeout = _provider_timeout_seconds(provider_config.get("timeout_seconds"), default=120.0)
+        return LocalOllamaProvider(base_url=base_url, timeout_seconds=timeout)
 
     raise ProviderError(f"Unsupported provider {provider_name!r}.")
+
+
+def local_provider_status(
+    provider_config: Mapping[str, Any],
+    *,
+    timeout_seconds: float | None = None,
+) -> LocalProviderStatus:
+    """Return Ollama backend reachability and model names for diagnostics."""
+
+    backend = str(provider_config.get("backend", "ollama")).strip() or "ollama"
+    if backend != "ollama":
+        return LocalProviderStatus(False, [], "Only the 'ollama' local backend is supported.")
+    base_url = provider_config.get("base_url")
+    if not isinstance(base_url, str) or not base_url.strip():
+        return LocalProviderStatus(False, [], "Local provider base_url is not configured.")
+    timeout = timeout_seconds
+    if timeout is None:
+        timeout = _provider_timeout_seconds(provider_config.get("timeout_seconds"), default=5.0)
+    url = _join_url(base_url, "/api/tags")
+    request = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        return LocalProviderStatus(False, [], f"Ollama tags request failed with HTTP {exc.code}.")
+    except urllib.error.URLError as exc:
+        return LocalProviderStatus(False, [], f"Ollama backend is unreachable at {base_url}: {exc.reason}.")
+    except TimeoutError:
+        return LocalProviderStatus(False, [], f"Ollama backend timed out at {base_url}.")
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return LocalProviderStatus(False, [], "Ollama tags response was not valid JSON.")
+    models = _ollama_model_names(payload)
+    return LocalProviderStatus(True, models, f"Ollama backend is reachable at {base_url}.")
 
 
 class MockProvider:
@@ -477,6 +529,208 @@ class MockProvider:
                 f"Drafts one canonical note from {len(source_note_ids)} source notes and recommends supersession."
             ),
         }
+
+
+class LocalOllamaProvider:
+    """Ollama local HTTP API adapter using the provider structured response contract."""
+
+    def __init__(self, *, base_url: str, timeout_seconds: float = 120.0) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.timeout_seconds = timeout_seconds
+
+    def extract_candidates(
+        self,
+        *,
+        text: str,
+        source_path: Path,
+        max_notes: int,
+        model: str,
+    ) -> ExtractionResult:
+        prompt = (
+            "Extract durable KB Librarian candidate notes from this markdown/text document. "
+            "Return only JSON with shape {\"candidates\": [...]}. Each candidate must include "
+            "title, summary, knowledge_type, body, retrieval_phrases, tags, confidence, "
+            "utility_score, and may include topic, agent_use, applies_when, "
+            "does_not_apply_when, failure_modes, claims. Prefer zero candidates over weak notes. "
+            f"Return at most {max_notes} candidates.\n\n"
+            f"Source path: {source_path.as_posix()}\n\n{text}"
+        )
+        payload = self._generate_json(model=model, prompt=prompt)
+        result = validate_extraction_payload(payload)
+        return ExtractionResult(candidates=result.candidates[:max_notes])
+
+    def classify_candidate(
+        self,
+        *,
+        candidate: CandidateNote,
+        text: str,
+        source_path: Path,
+        model: str,
+    ) -> ClassificationResult:
+        prompt = (
+            "Classify this KB candidate. Return only JSON with keys topic, knowledge_type, "
+            "confidence, and reason. Topic should be a concise kebab-case compatible topic "
+            "name. Confidence must be high, medium, or low.\n\n"
+            f"Source path: {source_path.as_posix()}\n"
+            f"Candidate: {json.dumps(candidate_to_payload(candidate), sort_keys=True)}\n\n"
+            f"Document excerpt:\n{text[:6000]}"
+        )
+        return validate_classification_payload(self._generate_json(model=model, prompt=prompt))
+
+    def integration_verdict(
+        self,
+        *,
+        candidate: CandidateNote,
+        classification: ClassificationResult,
+        matches: list[dict[str, Any]],
+        text: str,
+        source_path: Path,
+        model: str,
+    ) -> IntegrationResult:
+        prompt = (
+            "You are integrating a candidate KB note into an existing artifact. "
+            "Return only JSON with keys verdict, target_note_ids, and rationale. "
+            "Allowed verdict values: identical, adds_nuance, contradicts, unrelated. "
+            "Choose target_note_ids from the provided matches. Return [] when verdict is unrelated.\n\n"
+            f"Source path: {source_path.as_posix()}\n"
+            f"Candidate: {json.dumps(candidate_to_payload(candidate), sort_keys=True)}\n"
+            f"Classification: {json.dumps(classification.__dict__, sort_keys=True)}\n"
+            f"Matches: {json.dumps(matches, sort_keys=True)}\n\n"
+            f"Document excerpt:\n{text[:6000]}"
+        )
+        return validate_integration_payload(self._generate_json(model=model, prompt=prompt))
+
+    def synthesize_context(self, **kwargs: object) -> str:
+        task = str(kwargs.get("task", "")).strip()
+        mode = str(kwargs.get("mode", "coding")).strip() or "coding"
+        budget = int(kwargs.get("budget", 1800))
+        model = str(kwargs.get("model", "")).strip()
+        selected_notes = kwargs.get("selected_notes")
+        if not isinstance(selected_notes, list):
+            selected_notes = []
+        prompt = (
+            "Synthesize compact KB context in markdown with exactly these sections:\n"
+            "## Directly relevant techniques\n"
+            "## Applicable heuristics\n"
+            "## Warnings / failure modes\n"
+            "## Suggested agent behavior\n\n"
+            "Ground every claim in the selected notes and cite note IDs in square brackets like [2026-...]. "
+            "Do not invent facts outside selected notes.\n\n"
+            f"Task: {task}\n"
+            f"Mode: {mode}\n"
+            f"Budget tokens: {budget}\n\n"
+            f"Selected notes JSON:\n{json.dumps(selected_notes, sort_keys=True)}"
+        )
+        return self._generate_text(model=model, prompt=prompt).strip()
+
+    def synthesize_exploration(self, **kwargs: object) -> str:
+        problem = str(kwargs.get("problem", "")).strip()
+        budget = int(kwargs.get("budget", 3000))
+        model = str(kwargs.get("model", "")).strip()
+        selected_notes = kwargs.get("selected_notes")
+        if not isinstance(selected_notes, list):
+            selected_notes = []
+        prompt = (
+            "Synthesize broad KB exploration in markdown with exactly these sections:\n"
+            "## Directly relevant concepts\n"
+            "## Adjacent patterns\n"
+            "## Tensions / tradeoffs\n"
+            "## Possible analogies\n"
+            "## Anti-patterns to avoid\n"
+            "## Open questions\n\n"
+            "Ground every claim in the selected notes and cite note IDs in square brackets like [2026-...]. "
+            "Use adjacent concepts only when the selected notes support them. "
+            "Do not invent facts outside selected notes.\n\n"
+            f"Problem: {problem}\n"
+            f"Budget tokens: {budget}\n\n"
+            f"Selected notes JSON:\n{json.dumps(selected_notes, sort_keys=True)}"
+        )
+        return self._generate_text(model=model, prompt=prompt).strip()
+
+    def synthesize_compaction(self, **kwargs: object) -> Mapping[str, Any]:
+        model = str(kwargs.get("model", "")).strip()
+        cluster_id = str(kwargs.get("cluster_id", "")).strip()
+        source_notes = kwargs.get("source_notes")
+        if not isinstance(source_notes, list):
+            source_notes = []
+        prompt = (
+            "Draft a review-gated KB compaction proposal. Return only JSON with keys:\n"
+            "frontmatter, body, source_note_ids, dispositions, diff_summary.\n\n"
+            "frontmatter must include title, summary, topic, knowledge_type, confidence, "
+            "retrieval_phrases, and tags. Do not include an id; the reviewer will assign one later. "
+            "body must be markdown for the proposed canonical note and cite source note IDs in square brackets. "
+            "dispositions must be a list of objects with note_id, recommendation, and rationale; "
+            "recommendation should be one of supersede, delete, keep, or review. "
+            "diff_summary must explain the user-visible change in plain language. "
+            "Do not apply changes to notes.\n\n"
+            f"Cluster ID: {cluster_id}\n"
+            f"Source notes JSON:\n{json.dumps(source_notes, sort_keys=True)}"
+        )
+        payload = self._generate_json(model=model, prompt=prompt)
+        if not isinstance(payload, Mapping):
+            raise ProviderError("Compaction response must be a JSON object.")
+        return payload
+
+    def _generate_json(self, *, model: str, prompt: str) -> Any:
+        text = self._ollama_generate(model=model, prompt=prompt, json_format=True)
+        return parse_json_response(text)
+
+    def _generate_text(self, *, model: str, prompt: str) -> str:
+        return self._ollama_generate(model=model, prompt=prompt, json_format=False)
+
+    def _ollama_generate(self, *, model: str, prompt: str, json_format: bool) -> str:
+        if not model:
+            raise ProviderError("Local provider operation requires a model.")
+        body: dict[str, Any] = {"model": model, "prompt": prompt, "stream": False}
+        if json_format:
+            body["format"] = "json"
+        request = urllib.request.Request(
+            _join_url(self.base_url, "/api/generate"),
+            data=json.dumps(body).encode("utf-8"),
+            method="POST",
+            headers={"content-type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                raw = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            try:
+                response_body = exc.read().decode("utf-8")
+            except Exception:
+                response_body = ""
+            body_excerpt = response_body.strip().replace("\n", " ")[:240]
+            message = f"Local Ollama request failed with HTTP {exc.code}"
+            if body_excerpt:
+                message += f": {body_excerpt}"
+            message += ". Start Ollama, pull the configured model, or switch the operation route."
+            raise ProviderError(message) from exc
+        except urllib.error.URLError as exc:
+            raise ProviderError(
+                "Local Ollama request failed: "
+                f"{exc}. Start Ollama at {self.base_url}, pull model {model!r}, "
+                "or switch the operation route."
+            ) from exc
+        except TimeoutError as exc:
+            raise ProviderError(
+                f"Local Ollama request timed out after {self.timeout_seconds:g}s. "
+                "Increase providers.local.timeout_seconds or switch the operation route."
+            ) from exc
+
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ProviderError("Local Ollama response was not valid JSON.") from exc
+        if not isinstance(payload, Mapping):
+            raise ProviderError("Local Ollama response was not a JSON object.")
+        if payload.get("error"):
+            raise ProviderError(
+                "Local Ollama returned an error: "
+                f"{payload['error']}. Pull model {model!r} or switch the operation route."
+            )
+        response = payload.get("response")
+        if not isinstance(response, str) or not response.strip():
+            raise ProviderError("Local Ollama response did not contain text content.")
+        return response
 
 
 class AnthropicProvider:
@@ -909,6 +1163,36 @@ def _clean_string_list(value: list[Any], field: str) -> list[str]:
         if stripped:
             cleaned.append(stripped)
     return cleaned
+
+
+def _provider_timeout_seconds(value: Any, *, default: float) -> float:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)) and float(value) > 0:
+        return float(value)
+    return default
+
+
+def _join_url(base_url: str, path: str) -> str:
+    return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _ollama_model_names(payload: Any) -> list[str]:
+    if not isinstance(payload, Mapping):
+        return []
+    models = payload.get("models")
+    if not isinstance(models, list):
+        return []
+    names: list[str] = []
+    for item in models:
+        if not isinstance(item, Mapping):
+            continue
+        name = item.get("name")
+        model = item.get("model")
+        for value in (name, model):
+            if isinstance(value, str) and value.strip() and value.strip() not in names:
+                names.append(value.strip())
+    return sorted(names)
 
 
 def _has_no_durable_note_signal(text: str) -> bool:

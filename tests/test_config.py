@@ -24,6 +24,9 @@ def test_default_config_contains_phase_1_sections(tmp_path):
 
     assert "providers:" in rendered
     assert "retry:" in rendered
+    assert "local:" in rendered
+    assert "backend: ollama" in rendered
+    assert "base_url: http://127.0.0.1:11434" in rendered
     assert "operations:" in rendered
     assert "retrieval:" in rendered
     assert "ingest:" in rendered
@@ -134,6 +137,31 @@ def test_validate_config_rejects_invalid_provider_retry_settings(tmp_path):
     config["providers"]["retry"]["base_delay_seconds"] = 1.0
     config["providers"]["retry"]["max_delay_seconds"] = 0.2
     with pytest.raises(ConfigError, match="max_delay_seconds"):
+        validate_config(config)
+
+
+def test_validate_config_accepts_local_provider_routes(tmp_path):
+    config = default_config(tmp_path)
+    for operation in config["operations"]:
+        config["operations"][operation] = {"provider": "local", "model": "llama3.2"}
+
+    validate_config(config)
+
+
+def test_validate_config_rejects_malformed_local_provider(tmp_path):
+    config = default_config(tmp_path)
+    config["providers"]["local"]["backend"] = "llama-cpp"
+    with pytest.raises(ConfigError, match="providers.local.backend"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["local"]["base_url"] = "127.0.0.1:11434"
+    with pytest.raises(ConfigError, match="providers.local.base_url"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["local"]["timeout_seconds"] = 0
+    with pytest.raises(ConfigError, match="providers.local.timeout_seconds"):
         validate_config(config)
 
 

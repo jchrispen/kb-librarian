@@ -25,12 +25,13 @@ from kb_librarian.ingest import ingest
 from kb_librarian.init import initialize_data_dir
 from kb_librarian.notes import read_note
 from kb_librarian.paths import DIRECTORIES, LOG_FILES, REVIEW_STATE_FILE, ROOT_FILES, config_path
+from kb_librarian.providers import local_provider_status
 from kb_librarian.review import STATE_VERSION, ReviewStateError, validate_review_item
 from kb_librarian.search_index import load_backend, query_candidates
 from kb_librarian.storage import NOTE_ID_REFERENCE_PATTERN, NoteRecord, iter_note_files
 
 SEVERITIES = ("ok", "warn", "error")
-SUPPORTED_PROVIDERS = {"anthropic", "mock"}
+SUPPORTED_PROVIDERS = {"anthropic", "local", "mock"}
 
 
 @dataclass(frozen=True)
@@ -705,6 +706,17 @@ def _check_provider_routes(
             if isinstance(route, Mapping) and str(route.get("provider", "")).strip()
         }
     )
+    local_route_models = sorted(
+        {
+            str(route.get("model")).strip()
+            for route in operations.values()
+            if (
+                isinstance(route, Mapping)
+                and str(route.get("provider", "")).strip() == "local"
+                and str(route.get("model", "")).strip()
+            )
+        }
+    )
     for provider_name in routed_providers:
         provider_config = providers.get(provider_name)
         if not isinstance(provider_config, Mapping):
@@ -745,6 +757,43 @@ def _check_provider_routes(
                         "warn",
                         "provider-api-key-unset",
                         f"Environment variable {api_key_env} is not set for provider-backed commands.",
+                    )
+                )
+        elif provider_name == "local":
+            status = local_provider_status(provider_config, timeout_seconds=2.0)
+            if not status.reachable:
+                findings.append(
+                    DoctorFinding(
+                        "Providers",
+                        "error",
+                        "local-provider-unreachable",
+                        f"{status.message} Start Ollama, check providers.local.base_url, or switch local operation routes.",
+                    )
+                )
+                continue
+            missing_models = [
+                model
+                for model in local_route_models
+                if model not in status.models and f"{model}:latest" not in status.models
+            ]
+            if missing_models and status.models:
+                findings.append(
+                    DoctorFinding(
+                        "Providers",
+                        "warn",
+                        "local-provider-model-missing",
+                        "Local provider is reachable, but routed model(s) were not listed by Ollama: "
+                        + ", ".join(missing_models)
+                        + ". Run `ollama pull <model>` or update operation routes.",
+                    )
+                )
+            else:
+                findings.append(
+                    DoctorFinding(
+                        "Providers",
+                        "ok",
+                        "local-provider-reachable",
+                        status.message,
                     )
                 )
 

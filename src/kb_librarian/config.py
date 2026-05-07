@@ -6,6 +6,7 @@ import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlparse
 
 import yaml
 
@@ -78,6 +79,11 @@ def default_config(data_dir: str | Path | None = None, *, hooks: bool = False) -
         "providers": {
             "anthropic": {
                 "api_key_env": "ANTHROPIC_API_KEY",
+            },
+            "local": {
+                "backend": "ollama",
+                "base_url": "http://127.0.0.1:11434",
+                "timeout_seconds": 120,
             },
             "retry": {
                 "max_attempts": 3,
@@ -268,6 +274,22 @@ def validate_config(config: Mapping[str, Any]) -> None:
         raise ConfigError("Config section providers.anthropic must be a mapping.")
     if not anthropic.get("api_key_env"):
         raise ConfigError("Config key providers.anthropic.api_key_env is required.")
+
+    local = config["providers"].get("local")
+    if local is not None:
+        if not isinstance(local, Mapping):
+            raise ConfigError("Config section providers.local must be a mapping when present.")
+        backend = local.get("backend", "ollama")
+        if backend != "ollama":
+            raise ConfigError("Config key providers.local.backend must be 'ollama'.")
+        base_url = local.get("base_url")
+        if not isinstance(base_url, str) or not base_url.strip():
+            raise ConfigError("Config key providers.local.base_url must be a non-empty URL.")
+        parsed_base_url = urlparse(base_url.strip())
+        if parsed_base_url.scheme not in {"http", "https"} or not parsed_base_url.netloc:
+            raise ConfigError("Config key providers.local.base_url must be an http(s) URL.")
+        _validate_positive_number(local, "providers.local.timeout_seconds")
+
     retry = config["providers"].get("retry")
     if retry is not None:
         if not isinstance(retry, Mapping):
@@ -333,3 +355,12 @@ def _validate_non_negative_number(section: Mapping[str, Any], key: str) -> None:
     value = section[leaf]
     if isinstance(value, bool) or not isinstance(value, (int, float)) or float(value) < 0:
         raise ConfigError(f"Config key {key} must be a number >= 0.")
+
+
+def _validate_positive_number(section: Mapping[str, Any], key: str) -> None:
+    leaf = key.rsplit(".", maxsplit=1)[-1]
+    if leaf not in section:
+        return
+    value = section[leaf]
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or float(value) <= 0:
+        raise ConfigError(f"Config key {key} must be a number > 0.")

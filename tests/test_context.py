@@ -19,6 +19,12 @@ def _configure_mock_synthesis(data_dir: Path) -> dict[str, object]:
     return config
 
 
+def _configure_local_synthesis(data_dir: Path) -> dict[str, object]:
+    config = default_config(data_dir)
+    config["operations"]["synthesize"] = {"provider": "local", "model": "llama3.2"}
+    return config
+
+
 def _seed_note(
     data_dir: Path,
     *,
@@ -104,6 +110,48 @@ def test_build_context_filters_archived_and_prefers_mode_types(tmp_path):
     assert selected_ids
     assert selected_ids[0] == "2026-05-05-coding-technique"
     assert "## Directly relevant techniques" in result.synthesis_markdown
+
+
+def test_context_and_explore_route_synthesis_to_local_provider(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    _seed_note(
+        tmp_path,
+        note_id="2026-05-05-local-route",
+        title="Local route synthesis",
+        summary="Use local provider routes for synthesis.",
+        knowledge_type="technique",
+        status="active",
+        confidence="high",
+        retrieval_phrases=["local provider routes", "route synthesis"],
+    )
+    reindex_data_dir(tmp_path)
+    config = _configure_local_synthesis(tmp_path)
+    provider_names = []
+    provider = MockProvider()
+
+    def _provider_from_config(config, provider_name, **kwargs):  # noqa: ANN001
+        provider_names.append(provider_name)
+        return provider
+
+    monkeypatch.setattr("kb_librarian.context.provider_from_config", _provider_from_config)
+
+    context = build_context(
+        tmp_path,
+        config=config,
+        task="local provider routes",
+        mode="coding",
+        budget=800,
+    )
+    explore = build_explore(
+        tmp_path,
+        config=config,
+        problem="local provider route synthesis",
+        budget=1200,
+    )
+
+    assert context.synthesis_markdown
+    assert explore.synthesis_markdown
+    assert provider_names == ["local", "local"]
 
 
 def test_build_context_applies_budget_trimming(tmp_path):

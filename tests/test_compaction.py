@@ -230,6 +230,40 @@ def test_draft_compaction_proposal_with_mock_provider_queues_review_item(tmp_pat
     assert "- proposed_body:" in rendered
 
 
+def test_draft_compaction_proposal_routes_to_local_provider(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    config["operations"]["compact"] = {"provider": "local", "model": "llama3.2"}
+    _write_note(
+        tmp_path,
+        note_id="2026-05-05-agent-context-local-a",
+        title="Agent context A",
+        summary="Use context before coding.",
+    )
+    _write_note(
+        tmp_path,
+        note_id="2026-05-05-agent-context-local-b",
+        title="Agent context B",
+        summary="Cite context sources.",
+    )
+
+    from kb_librarian.providers import MockProvider
+
+    provider_names = []
+    provider = MockProvider()
+
+    def _provider_from_config(config, provider_name, **kwargs):  # noqa: ANN001
+        provider_names.append(provider_name)
+        return provider
+
+    monkeypatch.setattr("kb_librarian.compaction.provider_from_config", _provider_from_config)
+
+    result = draft_compaction_proposal(tmp_path, config=config, target="agent-systems")
+
+    assert result.created is True
+    assert provider_names == ["local"]
+
+
 def test_draft_compaction_proposal_retries_transient_provider_failure(tmp_path, monkeypatch):
     initialize_data_dir(tmp_path)
     config = default_config(tmp_path)
