@@ -35,6 +35,14 @@ Fallback is explicit and conservative. It runs only when `providers.policy.fallb
 
 Fallback intentionally does not run for missing API keys, invalid provider names, malformed provider responses, validation errors, or other non-transient failures. Inspect `.kb/errors.log` for `provider-fallback` entries and run `kb doctor --data-dir <path>` to verify primary and fallback route configuration.
 
+## Cloud provider blocked by privacy policy
+
+When `privacy.cloud_llm_allowed` is `false`, Anthropic and Codex provider attempts fail before provider construction. Route provider-backed operations to `provider: local`, or set `privacy.cloud_llm_allowed: true` when cloud calls are acceptable.
+
+For sensitive topics, `privacy.blocked_topics` also blocks cloud calls for operations with note-topic context, such as `kb context`, `kb explore`, and `kb compact`. Ingest does not know final note topics before provider classification, so use local routes when ingesting sensitive raw files.
+
+Use `privacy.redact_patterns` for known sensitive string patterns. Redaction affects provider-bound payloads only; it does not edit raw files, notes, review items, or indexes.
+
 ## Codex provider routes fail
 
 Codex-compatible routes use `providers.codex.api_key_env` and `providers.codex.base_url`.

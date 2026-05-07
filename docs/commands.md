@@ -43,7 +43,7 @@ kb doctor [--data-dir <path>] [--self-test]
 
 `kb doctor` groups findings by subsystem and prints `ok`, `warn`, or `error` severities. It returns nonzero when any `error` finding is present.
 
-Checks include required layout, config validity, note schema validity, duplicate IDs, broken note ID references, review state readability, ingest lock/checkpoint recovery state, markdown index freshness, backlinks, manifest freshness, lexical index freshness, raw ingest errors, parser dependency availability, auto-commit configuration, provider route and fallback policy presence, Codex credential presence when any primary or fallback route uses `provider: codex`, and local-provider reachability when any primary or fallback route uses `provider: local`.
+Checks include required layout, config validity, note schema validity, duplicate IDs, broken note ID references, review state readability, ingest lock/checkpoint recovery state, markdown index freshness, backlinks, manifest freshness, lexical index freshness, raw ingest errors, parser dependency availability, auto-commit configuration, provider route and fallback policy presence, privacy/cloud-provider conflicts, Codex credential presence when any primary or fallback route uses `provider: codex`, and local-provider reachability when any primary or fallback route uses `provider: local`.
 
 `kb doctor --self-test` creates a temporary KB, configures the deterministic mock provider, ingests one tiny fixture, rebuilds indexes, searches it, and runs doctor against the fixture. It is offline and does not mutate your configured KB.
 
@@ -109,7 +109,7 @@ Human-readable and JSON reports include outcome counts, created/appended note ID
 
 `kb ingest` writes `.kb/ingest.lock` while it is mutating raw files, notes, review state, or indexes. A second ingest exits without processing. If an earlier ingest was interrupted, run `kb ingest --resume`; use `--force` only when you intend to discard a stale lock/checkpoint and start over.
 
-Provider-backed ingest phases use configurable retry/backoff (`providers.retry`) for transient failures, then apply explicit `providers.policy.fallback` routes when configured. Retry, fallback, and final-stop diagnostics are logged to `.kb/errors.log`.
+Provider-backed ingest phases use configurable retry/backoff (`providers.retry`) for transient failures, then apply explicit `providers.policy.fallback` routes when configured. Configured `privacy.redact_patterns` are applied to provider-bound text without mutating raw files. Retry, fallback, and final-stop diagnostics are logged to `.kb/errors.log`.
 
 When `git.auto_commit` and `git.commit_ingests` are enabled, successful ingests are committed after completion. JSON output includes an `auto_commit` object with attempted/committed status, message, commit SHA, and paths.
 

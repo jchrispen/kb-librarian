@@ -16,6 +16,7 @@ Phase 5 assumes Phases 1-4 are complete.
 | [05b - Codex Provider Support](05b-codex-provider-support.md) | Complete | Added a Codex-compatible Responses API provider adapter, config validation, routed operation support, diagnostics, docs, and tests. |
 | [05c - Provider Policy and Fallback](05c-provider-policy-and-fallback.md) | Complete | Added explicit default-provider policy, bounded per-operation fallback, provider-policy execution, diagnostics, docs, and tests. |
 | [05d - Embedding Retrieval Seams](05d-embedding-retrieval-seams.md) | Next | Add retrieval/config/index seams to enable future embedding retrieval without shipping it yet. |
+| [05e - Privacy and Redaction Controls](05e-privacy-and-redaction-controls.md) | Complete | Added first-pass privacy config validation, cloud-provider blocking, provider-bound redaction, diagnostics, docs, and tests. |
 
 ## Milestone Order
 
@@ -27,6 +28,8 @@ Phase 5 assumes Phases 1-4 are complete.
    - Priority: deterministic provider selection, fallback behavior, and doctor coverage.
 4. [05d - Embedding Retrieval Seams](05d-embedding-retrieval-seams.md)
    - Priority: forward-compatibility seams for later embedding retrieval work.
+5. [05e - Privacy and Redaction Controls](05e-privacy-and-redaction-controls.md)
+   - Priority: first-pass privacy controls for provider-bound payloads and cloud routing.
 
 Each milestone is a standalone, one-agent executable increment and should keep the CLI runnable with focused tests.
 
@@ -37,6 +40,7 @@ Each milestone is a standalone, one-agent executable increment and should keep t
 - Config and validation updates for multi-provider routing and conservative fallback policy.
 - Diagnostic coverage in `kb doctor` for provider misconfiguration and unavailable local backends.
 - Retrieval/config/index seams for deferred embedding retrieval work (no production embedding retrieval yet).
+- First-pass privacy/redaction controls for provider-bound payloads.
 
 ## Final Acceptance Criteria
 
@@ -45,6 +49,7 @@ Each milestone is a standalone, one-agent executable increment and should keep t
 - Provider selection is deterministic, explicit, and observable in error/reporting surfaces.
 - Fallback behavior is bounded and does not silently mask configuration problems.
 - Embedding-retrieval prep introduces no regression to existing lexical retrieval behavior.
+- Privacy controls can block cloud provider attempts and redact configured provider-bound payload text without mutating stored artifacts.
 
 ## Phase Test Strategy
 
@@ -58,5 +63,5 @@ Each milestone is a standalone, one-agent executable increment and should keep t
 - MCP wrapper work (explicitly deferred).
 - TUI/web review interface.
 - Full embedding retrieval implementation.
-- Expanded privacy/redaction tooling.
+- Interactive privacy confirmation prompts and local-only note metadata.
 - Multi-machine conflict helpers.

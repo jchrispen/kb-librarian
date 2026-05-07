@@ -111,6 +111,7 @@ privacy:
   cloud_llm_allowed: true
   blocked_topics: []
   redact_patterns: []
+  require_confirmation_for_cloud_llm: false
 
 hooks:
   session_start_ingest: false
@@ -216,6 +217,16 @@ providers:
 ```
 
 Fallback never runs for configuration errors, missing credentials, provider response schema errors, or other non-transient failures. Provider attempts are bounded by the configured fallback list and each attempted provider uses `providers.retry` independently. `kb doctor` validates fallback references and checks configured fallback providers such as Codex credentials or local Ollama reachability.
+
+## Privacy Configuration
+
+`privacy.cloud_llm_allowed` controls whether cloud providers (`anthropic` and `codex`) may be attempted by provider-backed commands. When it is `false`, cloud provider attempts fail before provider construction; route operations to `provider: local` for fully local provider-backed flows.
+
+`privacy.blocked_topics` blocks cloud provider attempts when an operation has note-topic context matching a listed topic. This applies to context/explore synthesis and compaction proposal drafting. Ingest has no reliable final topic before provider classification, so use local routes when ingesting sensitive raw material.
+
+`privacy.redact_patterns` is a list of Python regular expressions applied to provider-bound text and structured payload strings before LLM calls. Redaction does not mutate raw files, canonical notes, review state, or generated indexes.
+
+`privacy.require_confirmation_for_cloud_llm` is validated as a future seam. The current CLI does not implement interactive confirmation prompts.
 
 ## Git Automation
 

@@ -6,7 +6,7 @@ It stores durable knowledge as markdown files in a separate data directory, buil
 
 ## Status
 
-This repository currently ships the Phase 1 core workflow, Phase 2 daily-use ergonomics, Phase 3 hygiene/topic surfaces, Phase 4 robustness/polish features, the Phase 5a local-provider core, Phase 5b Codex provider support, and Phase 5c provider policy/fallback support:
+This repository currently ships the Phase 1 core workflow, Phase 2 daily-use ergonomics, Phase 3 hygiene/topic surfaces, Phase 4 robustness/polish features, the Phase 5a local-provider core, Phase 5b Codex provider support, Phase 5c provider policy/fallback support, and Phase 5e privacy/redaction controls:
 
 - `kb init`
 - `kb add`
@@ -42,6 +42,7 @@ Remaining Phase 5+ provider and retrieval extensions remain deferred backlog in 
 - Supports clean-worktree-protected topic rename/promote operations and review-gated topic split/merge proposals
 - Routes provider-backed operations through Anthropic by default, an opt-in Codex-compatible cloud provider, or an opt-in local Ollama provider
 - Supports explicit provider policy with deterministic default-provider selection and bounded per-operation fallback
+- Supports first-pass privacy controls for blocking cloud providers and redacting provider-bound payload text
 - Retries transient provider failures with bounded backoff and logs retry/final-stop diagnostics
 - Includes deterministic golden corpus regression tests plus opt-in live-provider smoke coverage
 - Generates optional hook/scheduler templates without installing them automatically
@@ -165,6 +166,8 @@ The generated config includes an opt-in `providers.codex` section for OpenAI Res
 The generated config also includes an opt-in `providers.local` section for Ollama. To run provider-backed operations locally, set the operation routes to `provider: local`, choose an installed Ollama model, start Ollama, and run `kb doctor` to verify reachability.
 
 Provider retries are configurable under `providers.retry` (`max_attempts`, `base_delay_seconds`, `max_delay_seconds`, `jitter_seconds`) and apply to provider-backed operations. Explicit provider policy is configured under `providers.policy`: `default_provider` supplies a provider when an operation omits one, and `fallback` lists bounded per-operation fallback routes that run only after transient failures exhaust retries.
+
+Privacy controls are configured under `privacy`. Set `cloud_llm_allowed: false` to block Anthropic/Codex provider attempts, use `blocked_topics` to block cloud calls for selected note topics when topic context is available, and use `redact_patterns` to redact provider-bound payload text without mutating stored KB artifacts.
 
 For offline development or tests, the codebase also supports a deterministic `mock` provider, but it is not the default config written by `kb init`.
 
