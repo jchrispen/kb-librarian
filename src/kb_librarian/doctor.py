@@ -25,6 +25,7 @@ from kb_librarian.ingest import ingest
 from kb_librarian.init import initialize_data_dir
 from kb_librarian.notes import read_note
 from kb_librarian.paths import DIRECTORIES, LOG_FILES, REVIEW_STATE_FILE, ROOT_FILES, config_path
+from kb_librarian.privacy import is_cloud_provider
 from kb_librarian.providers import local_provider_status, operation_routes
 from kb_librarian.review import STATE_VERSION, ReviewStateError, validate_review_item
 from kb_librarian.search_index import load_backend, query_candidates
@@ -717,6 +718,7 @@ def _check_provider_routes(
         return
 
     routed_providers = sorted({route.provider for routes in resolved_routes.values() for route in routes})
+    cloud_providers = sorted(provider for provider in routed_providers if is_cloud_provider(provider))
     local_route_models = sorted(
         {route.model for routes in resolved_routes.values() for route in routes if route.provider == "local"}
     )
@@ -833,6 +835,19 @@ def _check_provider_routes(
                         status.message,
                     )
                 )
+
+    privacy = config.get("privacy")
+    if isinstance(privacy, Mapping) and privacy.get("cloud_llm_allowed") is False and cloud_providers:
+        findings.append(
+            DoctorFinding(
+                "Providers",
+                "warn",
+                "cloud-provider-blocked-by-privacy",
+                "Privacy policy disables cloud LLMs, but cloud provider routes are configured: "
+                + ", ".join(cloud_providers)
+                + ". Route provider-backed operations to local or enable privacy.cloud_llm_allowed.",
+            )
+        )
 
     if (
         _subsystem_count(findings, "Providers", "warn") == warnings_before

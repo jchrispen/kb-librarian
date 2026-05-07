@@ -10,6 +10,7 @@ from typing import Any, Mapping
 
 from kb_librarian.indexing import reindex_data_dir
 from kb_librarian.provider_retry import RetryEvent, retry_policy_from_config
+from kb_librarian.privacy import redact_payload, redact_text
 from kb_librarian.providers import ProviderFallbackEvent, call_with_provider_policy, provider_from_config
 from kb_librarian.search_index import query_candidates, tokenize_query
 from kb_librarian.storage import NOTE_ID_REFERENCE_PATTERN, NoteRecord, load_note_records
@@ -188,20 +189,22 @@ def build_context(
             message="No useful notes found for this task. Try `kb search` for precise lookup.",
         )
 
+    selected_payload = redact_payload(config, [_selection_payload(item) for item in selected])
     synthesis = call_with_provider_policy(
         config,
         "synthesize",
         operation_name="context:synthesize",
         retry_policy=retry_policy,
         call=lambda provider, route: provider.synthesize_context(
-            task=task,
+            task=redact_text(config, task),
             mode=mode,
             budget=budget,
             model=route.model,
-            selected_notes=[_selection_payload(item) for item in selected],
+            selected_notes=selected_payload,
         ),
         env=env,
         provider_factory=provider_from_config,
+        privacy_topics=[item.topic for item in selected],
         on_retry=lambda event: _log_provider_event(data_dir, phase="context", event=event, query=task),
         on_final_failure=lambda event: _log_provider_event(
             data_dir,
@@ -272,19 +275,21 @@ def build_explore(
     if not selected:
         return _empty_explore_result(problem=problem, budget=budget)
 
+    selected_payload = redact_payload(config, [_selection_payload(item) for item in selected])
     synthesis = call_with_provider_policy(
         config,
         "synthesize",
         operation_name="explore:synthesize",
         retry_policy=retry_policy,
         call=lambda provider, route: provider.synthesize_exploration(
-            problem=problem,
+            problem=redact_text(config, problem),
             budget=budget,
             model=route.model,
-            selected_notes=[_selection_payload(item) for item in selected],
+            selected_notes=selected_payload,
         ),
         env=env,
         provider_factory=provider_from_config,
+        privacy_topics=[item.topic for item in selected],
         on_retry=lambda event: _log_provider_event(data_dir, phase="explore", event=event, query=problem),
         on_final_failure=lambda event: _log_provider_event(
             data_dir,

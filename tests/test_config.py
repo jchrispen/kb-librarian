@@ -45,6 +45,7 @@ def test_default_config_contains_phase_1_sections(tmp_path):
     assert "commit_topic_reorganizations: true" in rendered
     assert "allow_unrelated_changes: false" in rendered
     assert "privacy:" in rendered
+    assert "require_confirmation_for_cloud_llm: false" in rendered
     assert "hooks:" in rendered
     assert "session_start_ingest: false" in rendered
 
@@ -251,4 +252,26 @@ def test_validate_config_rejects_non_boolean_git_policy(tmp_path):
     config["git"]["auto_commit"] = "yes"
 
     with pytest.raises(ConfigError, match="git.auto_commit"):
+        validate_config(config)
+
+
+def test_validate_config_rejects_invalid_privacy_policy(tmp_path):
+    config = default_config(tmp_path)
+    config["privacy"]["cloud_llm_allowed"] = "yes"
+    with pytest.raises(ConfigError, match="privacy.cloud_llm_allowed"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["privacy"]["blocked_topics"] = "sensitive"
+    with pytest.raises(ConfigError, match="privacy.blocked_topics"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["privacy"]["redact_patterns"] = ["("]
+    with pytest.raises(ConfigError, match="privacy.redact_patterns"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["privacy"]["require_confirmation_for_cloud_llm"] = "yes"
+    with pytest.raises(ConfigError, match="privacy.require_confirmation_for_cloud_llm"):
         validate_config(config)

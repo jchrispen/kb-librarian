@@ -15,6 +15,7 @@ from kb_librarian.indexing import reindex_data_dir
 from kb_librarian.mutations import atomic_write_note, require_clean_worktree
 from kb_librarian.notes import Note, generate_note_id
 from kb_librarian.provider_retry import RetryEvent, retry_policy_from_config
+from kb_librarian.privacy import redact_payload
 from kb_librarian.providers import (
     CompactionDraft,
     ProviderFallbackEvent,
@@ -223,21 +224,27 @@ def draft_compaction_proposal(
     ensure_unique_note_ids(records)
     source_records, cluster_id = resolve_compaction_target(data_dir, records, target)
     source_note_ids = [record.note_id for record in source_records]
+    source_topics = [str(record.note.frontmatter.get("topic", "")) for record in source_records]
     if len(source_records) < MIN_CLUSTER_NOTES:
         raise KBLibrarianError("Compaction requires at least two source notes.")
 
     retry_policy = retry_policy_from_config(config)
+    source_payload = redact_payload(
+        config,
+        [_provider_note_payload(record, data_dir=data_dir) for record in source_records],
+    )
     payload = call_with_provider_policy(
         config,
         "compact",
         operation_name="compact:synthesize",
         retry_policy=retry_policy,
         call=lambda provider, route: provider.synthesize_compaction(
-            source_notes=[_provider_note_payload(record, data_dir=data_dir) for record in source_records],
+            source_notes=source_payload,
             cluster_id=cluster_id,
             model=route.model,
         ),
         provider_factory=provider_from_config,
+        privacy_topics=source_topics,
         on_retry=lambda event: _log_provider_event(data_dir, phase="compact", event=event, cluster_id=cluster_id),
         on_final_failure=lambda event: _log_provider_event(
             data_dir,

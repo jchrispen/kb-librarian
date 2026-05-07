@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
@@ -155,6 +156,7 @@ def default_config(data_dir: str | Path | None = None, *, hooks: bool = False) -
             "cloud_llm_allowed": True,
             "blocked_topics": [],
             "redact_patterns": [],
+            "require_confirmation_for_cloud_llm": False,
         },
         "hooks": {
             "session_start_ingest": bool(hooks),
@@ -371,6 +373,21 @@ def validate_config(config: Mapping[str, Any]) -> None:
         if key in git and not isinstance(git[key], bool):
             raise ConfigError(f"Config key git.{key} must be a boolean.")
 
+    privacy = config["privacy"]
+    if not isinstance(privacy["cloud_llm_allowed"], bool):
+        raise ConfigError("Config key privacy.cloud_llm_allowed must be a boolean.")
+    if "require_confirmation_for_cloud_llm" in privacy and not isinstance(
+        privacy["require_confirmation_for_cloud_llm"], bool
+    ):
+        raise ConfigError("Config key privacy.require_confirmation_for_cloud_llm must be a boolean.")
+    _validate_string_list(privacy, "privacy.blocked_topics")
+    _validate_string_list(privacy, "privacy.redact_patterns")
+    for index, pattern in enumerate(privacy.get("redact_patterns", [])):
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise ConfigError(f"Config key privacy.redact_patterns[{index}] is not a valid regex: {exc}") from exc
+
 
 def _validate_positive_int(section: Mapping[str, Any], key: str, *, minimum: int) -> None:
     leaf = key.rsplit(".", maxsplit=1)[-1]
@@ -397,6 +414,13 @@ def _validate_positive_number(section: Mapping[str, Any], key: str) -> None:
     value = section[leaf]
     if isinstance(value, bool) or not isinstance(value, (int, float)) or float(value) <= 0:
         raise ConfigError(f"Config key {key} must be a number > 0.")
+
+
+def _validate_string_list(section: Mapping[str, Any], key: str) -> None:
+    leaf = key.rsplit(".", maxsplit=1)[-1]
+    value = section.get(leaf)
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ConfigError(f"Config key {key} must be a list of strings.")
 
 
 def _validate_provider_policy(config: Mapping[str, Any]) -> None:

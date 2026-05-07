@@ -24,6 +24,7 @@ from kb_librarian.ingest_recovery import (
 from kb_librarian.notes import Note, generate_note_id, read_note, write_note
 from kb_librarian.parsers import parse_html, parse_pdf
 from kb_librarian.provider_retry import RetryEvent, retry_policy_from_config
+from kb_librarian.privacy import redact_text
 from kb_librarian.providers import (
     CandidateNote,
     ClassificationResult,
@@ -438,6 +439,7 @@ def _ingest_one(
 ) -> None:
     retry_policy = retry_policy_from_config(config)
     operation_id = checkpoint.operation_id if checkpoint is not None else None
+    provider_text = redact_text(config, parsed.text)
 
     ingest_config = config.get("ingest", {})
     max_notes = int(ingest_config.get("max_notes_per_doc", 7))
@@ -450,7 +452,7 @@ def _ingest_one(
         env=env,
         retry_policy=retry_policy,
         call=lambda provider, route: provider.extract_candidates(
-            text=parsed.text,
+            text=provider_text,
             source_path=parsed.path,
             max_notes=max_notes,
             model=route.model,
@@ -481,7 +483,7 @@ def _ingest_one(
             candidate_title=candidate.title,
             call=lambda provider, route: provider.classify_candidate(
                 candidate=candidate,
-                text=parsed.text,
+                text=provider_text,
                 source_path=parsed.path,
                 model=route.model,
             ),
@@ -530,7 +532,7 @@ def _ingest_one(
                     candidate=candidate,
                     classification=classification,
                     matches=matches,
-                    text=parsed.text,
+                    text=provider_text,
                     source_path=parsed.path,
                     model=route.model,
                 ),

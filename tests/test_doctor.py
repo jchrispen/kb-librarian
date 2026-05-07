@@ -236,3 +236,16 @@ def test_doctor_reports_codex_credentials_when_routed(tmp_path):
 
     assert report.error_count == 0
     assert "codex-provider-credentials" in rendered
+
+
+def test_doctor_warns_when_privacy_blocks_cloud_routes(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    config["privacy"]["cloud_llm_allowed"] = False
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 0
+    assert "cloud-provider-blocked-by-privacy" in rendered

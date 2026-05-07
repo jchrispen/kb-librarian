@@ -509,6 +509,35 @@ def test_ingest_falls_back_to_configured_provider_after_transient_failure(tmp_pa
     assert "to=fallback-mock" in errors_log
 
 
+def test_ingest_redacts_provider_bound_text_without_mutating_raw_file(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    config = configure_mock_provider(tmp_path)
+    config["privacy"]["redact_patterns"] = [r"secret-[0-9]+"]
+    source = tmp_path / "raw" / "redaction.md"
+    source.write_text(
+        "# Redaction\n\nThis provider payload includes secret-123 for testing.\n",
+        encoding="utf-8",
+    )
+    seen_text = []
+    provider = MockProvider()
+
+    class CapturingProvider(MockProvider):
+        def extract_candidates(self, **kwargs):  # type: ignore[override]
+            seen_text.append(kwargs["text"])
+            return provider.extract_candidates(**kwargs)
+
+    monkeypatch.setattr("kb_librarian.ingest.provider_from_config", lambda *args, **kwargs: CapturingProvider())
+
+    report = ingest(tmp_path, config=config)
+
+    assert report.errors == 0
+    assert seen_text
+    assert "secret-123" not in seen_text[0]
+    assert "[REDACTED]" in seen_text[0]
+    processed = next((tmp_path / "raw" / "processed").glob("**/redaction.md"))
+    assert "secret-123" in processed.read_text(encoding="utf-8")
+
+
 def test_ingest_routes_extract_classify_integrate_to_local_provider(tmp_path, monkeypatch):
     initialize_data_dir(tmp_path)
     config = local_ingest_config(tmp_path)

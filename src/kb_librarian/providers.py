@@ -9,7 +9,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol, TypeVar
+from typing import Any, Callable, Iterable, Mapping, Protocol, TypeVar
 
 from kb_librarian.errors import ProviderError
 from kb_librarian.notes import CONFIDENCE_LEVELS, KNOWLEDGE_TYPES
@@ -19,6 +19,7 @@ from kb_librarian.provider_retry import (
     call_with_retry,
     classify_provider_failure,
 )
+from kb_librarian.privacy import enforce_provider_privacy
 from kb_librarian.storage import normalize_topic_for_path
 
 
@@ -185,6 +186,7 @@ def call_with_provider_policy(
     call: Callable[[LLMProvider, OperationRoute], T],
     env: Mapping[str, str] | None = None,
     provider_factory: Callable[..., LLMProvider] | None = None,
+    privacy_topics: Iterable[str] = (),
     on_retry: Callable[[RetryEvent], None] | None = None,
     on_final_failure: Callable[[RetryEvent], None] | None = None,
     on_fallback: Callable[[ProviderFallbackEvent], None] | None = None,
@@ -201,6 +203,12 @@ def call_with_provider_policy(
     for index, route in enumerate(routes):
         attempted.append(route)
         try:
+            enforce_provider_privacy(
+                config,
+                provider_name=route.provider,
+                operation=operation_name,
+                topics=privacy_topics,
+            )
             provider = factory(config, route.provider, env=env)
             return call_with_retry(
                 _policy_attempt_name(operation_name, route),

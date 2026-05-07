@@ -256,6 +256,31 @@ def test_call_with_provider_policy_does_not_fallback_after_non_transient_failure
     assert attempts == ["primary"]
 
 
+def test_call_with_provider_policy_enforces_cloud_privacy_before_provider_creation(tmp_path):
+    config = default_config(tmp_path)
+    config["operations"]["synthesize"] = {"provider": "anthropic", "model": "claude-haiku-4-5"}
+    config["privacy"]["cloud_llm_allowed"] = False
+    attempts = []
+
+    def provider_factory(_config, provider_name, **kwargs):  # noqa: ANN001
+        attempts.append(provider_name)
+        return MockProvider()
+
+    from kb_librarian.provider_retry import retry_policy_from_config
+
+    with pytest.raises(ProviderError, match="Privacy policy"):
+        call_with_provider_policy(
+            config,
+            "synthesize",
+            operation_name="context:synthesize",
+            retry_policy=retry_policy_from_config({"providers": {"retry": {"max_attempts": 1}}}),
+            call=lambda provider, route: "ok",
+            provider_factory=provider_factory,
+        )
+
+    assert attempts == []
+
+
 def test_validate_integration_payload():
     result = validate_integration_payload(
         {
