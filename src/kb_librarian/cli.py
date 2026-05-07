@@ -7,7 +7,7 @@ import json
 import sys
 from datetime import date, datetime
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from kb_librarian import __version__
 from kb_librarian.config import load_config, resolve_data_dir
@@ -26,7 +26,7 @@ from kb_librarian.errors import (
     NoteValidationError,
 )
 from kb_librarian.hygiene import flag_suspect_note
-from kb_librarian.indexing import ReindexResult, reindex_data_dir
+from kb_librarian.indexing import ReindexResult, group_records_for_indexing, reindex_data_dir
 from kb_librarian.init import initialize_data_dir, render_preamble_guidance
 from kb_librarian.ingest import ingest, ingest_report_payload, render_report
 from kb_librarian.notes import KNOWLEDGE_TYPES, Note, body_template, generate_note_id, parse_note_text, write_note
@@ -40,6 +40,7 @@ from kb_librarian.review import (
 )
 from kb_librarian.search_index import query_candidates, score_document, tokenize_query
 from kb_librarian.storage import (
+    NoteRecord,
     canonical_note_path,
     ensure_topic_layout,
     ensure_unique_note_ids,
@@ -68,6 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_reindex_parser(subcommands)
     _add_search_parser(subcommands)
     _add_get_parser(subcommands)
+    _add_topics_parser(subcommands)
     _add_ingest_parser(subcommands)
     _add_review_parser(subcommands)
     _add_compact_parser(subcommands)
@@ -220,6 +222,17 @@ def _add_get_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentPar
     parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
     parser.add_argument("--summary", action="store_true", help="Print summary fields instead of full markdown.")
     parser.set_defaults(handler=_handle_get)
+
+
+def _add_topics_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subcommands.add_parser(
+        "topics",
+        help="List indexed topics, with optional hierarchy tree view.",
+        description="Show topic paths with note counts and optional tree rendering.",
+    )
+    parser.add_argument("--tree", action="store_true", help="Render nested slash-delimited topics as a tree.")
+    parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
+    parser.set_defaults(handler=_handle_topics)
 
 
 def _add_ingest_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -784,6 +797,159 @@ def _handle_get(args: argparse.Namespace) -> int:
 
     print(record.path.read_text(encoding="utf-8"), end="")
     return 0
+
+
+def _handle_topics(args: argparse.Namespace) -> int:
+    data_dir = resolve_data_dir(args.data_dir)
+    initialize_data_dir(data_dir)
+    records = load_note_records(data_dir, validate=True)
+    grouped = group_records_for_indexing(data_dir, records)
+    topics = sorted(grouped)
+    review_counts, review_available = _load_topic_review_counts(data_dir, records)
+
+    if args.tree:
+        print(_render_topic_tree(topics, grouped, review_counts, review_available), end="")
+    else:
+        print(_render_topic_list(topics, grouped, review_counts, review_available), end="")
+    return 0
+
+
+def _load_topic_review_counts(data_dir: Path, records: list[NoteRecord]) -> tuple[dict[str, dict[str, int]], bool]:
+    state_path = data_dir / "review" / "review-items.json"
+    if not state_path.exists():
+        return {}, False
+    try:
+        loaded = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}, False
+    if not isinstance(loaded, dict):
+        return {}, False
+    items = loaded.get("items")
+    if not isinstance(items, list):
+        return {}, False
+
+    by_note_id = {record.note_id: record.topic_path for record in records}
+    counts: dict[str, dict[str, int]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status", ""))
+        if status not in {"pending", "deferred"}:
+            continue
+        queue = str(item.get("queue", ""))
+        target_ids = _review_target_note_ids(item)
+        for note_id in target_ids:
+            topic = by_note_id.get(note_id)
+            if topic is None:
+                continue
+            topic_counts = counts.setdefault(topic, {"stale": 0, "orphan": 0, "review": 0})
+            if queue == "stale":
+                topic_counts["stale"] += 1
+            elif queue == "orphan":
+                topic_counts["orphan"] += 1
+            else:
+                topic_counts["review"] += 1
+    return counts, True
+
+
+def _review_target_note_ids(item: dict[str, Any]) -> set[str]:
+    targets: set[str] = set()
+    target_notes = item.get("target_notes")
+    if isinstance(target_notes, list):
+        for value in target_notes:
+            text = str(value).strip()
+            if text:
+                targets.add(text)
+    payload = item.get("payload")
+    if isinstance(payload, dict):
+        note_id = str(payload.get("note_id", "")).strip()
+        if note_id:
+            targets.add(note_id)
+    return targets
+
+
+def _render_topic_list(
+    topics: list[str],
+    grouped: dict[str, list[NoteRecord]],
+    review_counts: dict[str, dict[str, int]],
+    review_available: bool,
+) -> str:
+    lines = ["# Topics", ""]
+    if not topics:
+        lines.extend(["- No topics indexed yet.", ""])
+        return "\n".join(lines)
+    for topic in topics:
+        direct_notes = len(grouped.get(topic, []))
+        metrics = [f"notes={direct_notes}"]
+        if review_available:
+            counts = review_counts.get(topic, {})
+            metrics.append(f"stale={int(counts.get('stale', 0))}")
+            metrics.append(f"orphan={int(counts.get('orphan', 0))}")
+            metrics.append(f"review={int(counts.get('review', 0))}")
+        lines.append(f"- {topic} ({', '.join(metrics)})")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _render_topic_tree(
+    topics: list[str],
+    grouped: dict[str, list[NoteRecord]],
+    review_counts: dict[str, dict[str, int]],
+    review_available: bool,
+) -> str:
+    lines = ["# Topics", ""]
+    if not topics:
+        lines.extend(["- No topics indexed yet.", ""])
+        return "\n".join(lines)
+
+    children: dict[str, list[str]] = {}
+    for topic in topics:
+        parent = topic.rsplit("/", maxsplit=1)[0] if "/" in topic else ""
+        children.setdefault(parent, []).append(topic)
+    for child_topics in children.values():
+        child_topics.sort()
+
+    totals_cache: dict[str, tuple[int, int, int, int]] = {}
+
+    def aggregate(topic: str) -> tuple[int, int, int, int]:
+        if topic in totals_cache:
+            return totals_cache[topic]
+        direct_notes = len(grouped.get(topic, []))
+        direct_counts = review_counts.get(topic, {})
+        stale_total = int(direct_counts.get("stale", 0))
+        orphan_total = int(direct_counts.get("orphan", 0))
+        review_total = int(direct_counts.get("review", 0))
+        note_total = direct_notes
+        for child in children.get(topic, []):
+            child_notes, child_stale, child_orphan, child_review = aggregate(child)
+            note_total += child_notes
+            stale_total += child_stale
+            orphan_total += child_orphan
+            review_total += child_review
+        totals_cache[topic] = (note_total, stale_total, orphan_total, review_total)
+        return totals_cache[topic]
+
+    def render(topic: str, depth: int) -> None:
+        direct_notes = len(grouped.get(topic, []))
+        note_total, stale_total, orphan_total, review_total = aggregate(topic)
+        name = topic.rsplit("/", maxsplit=1)[-1]
+        metrics = []
+        if direct_notes != note_total:
+            metrics.append(f"notes={direct_notes} direct/{note_total} total")
+        else:
+            metrics.append(f"notes={note_total}")
+        if review_available:
+            metrics.append(f"stale={stale_total}")
+            metrics.append(f"orphan={orphan_total}")
+            metrics.append(f"review={review_total}")
+        lines.append(f"{'  ' * depth}- {name} ({', '.join(metrics)})")
+        for child in children.get(topic, []):
+            render(child, depth + 1)
+
+    for root_topic in children.get("", []):
+        render(root_topic, 0)
+    lines.append("")
+    return "\n".join(lines)
 
 
 def _handle_log_use(args: argparse.Namespace) -> int:

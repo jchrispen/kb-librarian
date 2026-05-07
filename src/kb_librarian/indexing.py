@@ -10,7 +10,13 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from kb_librarian.search_index import build_lexical_index
-from kb_librarian.storage import NOTE_ID_REFERENCE_PATTERN, NoteRecord, ensure_unique_note_ids, load_note_records
+from kb_librarian.storage import (
+    NOTE_ID_REFERENCE_PATTERN,
+    NoteRecord,
+    ensure_topic_layout,
+    ensure_unique_note_ids,
+    load_note_records,
+)
 from kb_librarian.usage import usage_stats_payload
 
 DEFAULT_TOPIC_PAGE_SIZE = 50
@@ -46,6 +52,8 @@ def reindex_data_dir(
     records = load_note_records(data_dir, validate=True)
     ensure_unique_note_ids(records)
     grouped = group_records_for_indexing(data_dir, records)
+    for topic in sorted(grouped):
+        ensure_topic_layout(data_dir, topic)
 
     artifacts: list[Path] = []
     index_pages = render_index_pages(data_dir, grouped, config=config)
@@ -140,9 +148,12 @@ def index_document(record: NoteRecord) -> dict[str, str]:
 
 def group_records_for_indexing(data_dir: Path, records: Iterable[NoteRecord]) -> dict[str, list[NoteRecord]]:
     grouped = _group_by_topic(records)
-    for topic_dir in sorted((data_dir / "topics").glob("*")):
-        if topic_dir.is_dir():
-            grouped.setdefault(topic_dir.name, [])
+    topics_root = data_dir / "topics"
+    if topics_root.exists():
+        for topic_dir in sorted(path for path in topics_root.rglob("*") if path.is_dir()):
+            topic = topic_dir.relative_to(topics_root).as_posix()
+            if topic and topic != ".":
+                grouped.setdefault(topic, [])
     return grouped
 
 

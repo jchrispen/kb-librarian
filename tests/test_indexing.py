@@ -88,6 +88,38 @@ def test_reindex_generates_markdown_indexes_backlinks_and_manifest(tmp_path):
     ) + "\n"
 
 
+def test_reindex_supports_nested_topics_and_creates_parent_child_artifacts(tmp_path):
+    initialize_data_dir(tmp_path)
+    nested = Note(
+        _note_frontmatter(
+            note_id="2026-05-05-retrieval-note",
+            title="Retrieval note",
+            topic="agent-systems/retrieval",
+        ),
+        "Nested topic body.\n",
+    )
+    write_note(
+        canonical_note_path(tmp_path, "agent-systems/retrieval", "2026-05-05-retrieval-note"),
+        nested,
+    )
+
+    result = reindex_data_dir(tmp_path)
+
+    assert result.note_count == 1
+    assert result.topic_count == 2
+    assert (tmp_path / "topics" / "agent-systems" / "scope.txt").is_file()
+    assert (tmp_path / "topics" / "agent-systems" / "retrieval" / "scope.txt").is_file()
+    assert (tmp_path / "topics" / "agent-systems" / "INDEX.md").is_file()
+    assert (tmp_path / "topics" / "agent-systems" / "retrieval" / "INDEX.md").is_file()
+    assert "2026-05-05-retrieval-note" in (
+        tmp_path / "topics" / "agent-systems" / "retrieval" / "INDEX.md"
+    ).read_text(encoding="utf-8")
+    assert "- [agent-systems](topics/agent-systems/)" in (tmp_path / "INDEX.md").read_text(encoding="utf-8")
+    assert "- [agent-systems/retrieval](topics/agent-systems/retrieval/)" in (
+        tmp_path / "INDEX.md"
+    ).read_text(encoding="utf-8")
+
+
 def test_index_document_includes_required_search_fields(tmp_path):
     initialize_data_dir(tmp_path)
     note = Note(

@@ -168,6 +168,73 @@ def test_kb_add_search_get_and_reindex_smoke(tmp_path):
     assert ".kb/fts.sqlite" in reindex_result.stdout
 
 
+def test_kb_topics_tree_and_nested_topic_search_filter(tmp_path):
+    parent_source = tmp_path / "parent.md"
+    parent_source.write_text(
+        "# Parent topic note\n\nGeneral agent systems guidance.\n",
+        encoding="utf-8",
+    )
+    child_source = tmp_path / "child.md"
+    child_source.write_text(
+        "# Nested retrieval note\n\nUnique nested retrieval phrase.\n",
+        encoding="utf-8",
+    )
+
+    parent_add = run_cli(
+        "add",
+        "--data-dir",
+        str(tmp_path),
+        "--topic",
+        "agent-systems",
+        "--type",
+        "technique",
+        "--from-file",
+        str(parent_source),
+    )
+    assert parent_add.returncode == 0
+    parent_match = NOTE_ID_PATTERN.search(parent_add.stdout)
+    assert parent_match is not None
+    parent_note_id = parent_match.group(1)
+
+    child_add = run_cli(
+        "add",
+        "--data-dir",
+        str(tmp_path),
+        "--topic",
+        "agent-systems/retrieval",
+        "--type",
+        "technique",
+        "--from-file",
+        str(child_source),
+    )
+    assert child_add.returncode == 0
+    child_match = NOTE_ID_PATTERN.search(child_add.stdout)
+    assert child_match is not None
+    child_note_id = child_match.group(1)
+
+    topics_result = run_cli("topics", "--data-dir", str(tmp_path))
+    assert topics_result.returncode == 0
+    assert "- agent-systems (notes=1" in topics_result.stdout
+    assert "- agent-systems/retrieval (notes=1" in topics_result.stdout
+
+    tree_result = run_cli("topics", "--tree", "--data-dir", str(tmp_path))
+    assert tree_result.returncode == 0
+    assert "- agent-systems (notes=1 direct/2 total" in tree_result.stdout
+    assert "  - retrieval (notes=1" in tree_result.stdout
+
+    nested_search = run_cli(
+        "search",
+        "Unique nested retrieval phrase",
+        "--topic",
+        "agent-systems/retrieval",
+        "--data-dir",
+        str(tmp_path),
+    )
+    assert nested_search.returncode == 0
+    assert child_note_id in nested_search.stdout
+    assert parent_note_id not in nested_search.stdout
+
+
 def test_kb_reindex_scan_clusters_and_compact_smoke(tmp_path):
     init_result = run_cli("init", "--data-dir", str(tmp_path))
     assert init_result.returncode == 0

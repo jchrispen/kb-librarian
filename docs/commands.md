@@ -77,6 +77,16 @@ Inspect one note by ID.
 kb get <id> [--data-dir <path>] [--summary]
 ```
 
+## `kb topics`
+
+List indexed topics and note counts.
+
+```bash
+kb topics [--tree] [--data-dir <path>]
+```
+
+Use `--tree` to render nested slash-delimited topics as a hierarchy. When `review/review-items.json` is available, `kb topics` and `kb topics --tree` include stale/orphan/review counts alongside note counts.
+
 ## `kb ingest`
 
 Ingest one markdown or text file, or process pending files in `raw/`.

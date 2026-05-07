@@ -6,7 +6,7 @@ It stores durable knowledge as markdown files in a separate data directory, buil
 
 ## Status
 
-This repository currently ships the Phase 1 core workflow, Phase 2 daily-use ergonomics, Phase 3a compaction proposals, Phase 3b hygiene signal queues, and Phase 3c diagnostics/scaled indexes:
+This repository currently ships the Phase 1 core workflow, Phase 2 daily-use ergonomics, and Phase 3a-3d hygiene/topic surfaces:
 
 - `kb init`
 - `kb add`
@@ -15,6 +15,7 @@ This repository currently ships the Phase 1 core workflow, Phase 2 daily-use erg
 - `kb compact`
 - `kb search`
 - `kb get`
+- `kb topics`
 - `kb review`
 - `kb context`
 - `kb explore`
@@ -35,6 +36,7 @@ Planned later-phase features such as topic reorganization and automation templat
 - Detects overlapping note clusters and drafts reviewable compaction proposals without rewriting notes
 - Surfaces stale, orphan, and low-utility notes with explainable review evidence
 - Reports KB health with read-only doctor diagnostics and an offline self-test
+- Supports slash-delimited hierarchical topics with nested topic indexes and `kb topics --tree`
 
 ## Install
 
@@ -132,6 +134,7 @@ Important review files:
 - `kb compact`: draft a review-gated canonical note proposal for a topic or cluster
 - `kb search`: search notes by title, summary, tags, retrieval phrases, and body text
 - `kb get`: inspect one note by ID
+- `kb topics`: list topics and render nested hierarchy with `--tree`
 - `kb review`: inspect and resolve bounded review queues backed by `review/review-items.json`
 - `kb context`: retrieve compact cited context for a task
 - `kb explore`: retrieve broader adjacent ideas and alternatives

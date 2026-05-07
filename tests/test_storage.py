@@ -32,16 +32,26 @@ def _frontmatter(note_id: str, topic: str) -> dict[str, object]:
 
 
 def test_topic_normalization_and_canonical_path(tmp_path):
-    assert normalize_topic_for_path(" Agent Systems / Design ") == "agent-systems-design"
+    assert normalize_topic_for_path(" Agent Systems / Design ") == "agent-systems/design"
 
     path = canonical_note_path(tmp_path, "Agent Systems / Design", "2026-05-05-cli-contract")
-    assert path == tmp_path / "topics" / "agent-systems-design" / "2026-05-05-cli-contract.md"
+    assert path == tmp_path / "topics" / "agent-systems" / "design" / "2026-05-05-cli-contract.md"
 
 
 def test_ensure_topic_layout_creates_scope_file(tmp_path):
     created = ensure_topic_layout(tmp_path, "Agent Systems")
     assert tmp_path.joinpath("topics", "agent-systems").is_dir()
     assert tmp_path.joinpath("topics", "agent-systems", "scope.txt").is_file()
+    assert created
+
+
+def test_ensure_topic_layout_creates_nested_parent_and_child_scope_files(tmp_path):
+    created = ensure_topic_layout(tmp_path, "Agent Systems / Retrieval")
+
+    assert tmp_path.joinpath("topics", "agent-systems").is_dir()
+    assert tmp_path.joinpath("topics", "agent-systems", "scope.txt").is_file()
+    assert tmp_path.joinpath("topics", "agent-systems", "retrieval").is_dir()
+    assert tmp_path.joinpath("topics", "agent-systems", "retrieval", "scope.txt").is_file()
     assert created
 
 

@@ -10,7 +10,8 @@ from typing import Iterable
 from kb_librarian.errors import DuplicateNoteIdError, NoteParseError, NoteValidationError
 from kb_librarian.notes import Note, read_note
 
-TOPIC_SAFE_PATTERN = re.compile(r"[^a-z0-9]+")
+TOPIC_SEGMENT_SAFE_PATTERN = re.compile(r"[^a-z0-9]+")
+TOPIC_SEPARATOR_PATTERN = re.compile(r"[\\/]+")
 NOTE_ID_REFERENCE_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*\b")
 
 TOPIC_SCOPE_TEMPLATE = (
@@ -33,12 +34,18 @@ class NoteRecord:
 
 
 def normalize_topic_for_path(topic: str) -> str:
-    normalized = TOPIC_SAFE_PATTERN.sub("-", topic.strip().lower()).strip("-")
-    return normalized or "untitled-topic"
+    segments: list[str] = []
+    for raw_segment in TOPIC_SEPARATOR_PATTERN.split(topic.strip()):
+        normalized_segment = TOPIC_SEGMENT_SAFE_PATTERN.sub("-", raw_segment.strip().lower()).strip("-")
+        if normalized_segment:
+            segments.append(normalized_segment)
+    return "/".join(segments) if segments else "untitled-topic"
 
 
 def topic_dir_path(data_dir: Path, topic: str) -> Path:
-    return data_dir / "topics" / normalize_topic_for_path(topic)
+    normalized = normalize_topic_for_path(topic)
+    segments = [segment for segment in normalized.split("/") if segment]
+    return data_dir / "topics" / Path(*segments)
 
 
 def topic_scope_path(data_dir: Path, topic: str) -> Path:
@@ -51,17 +58,20 @@ def canonical_note_path(data_dir: Path, topic: str, note_id: str) -> Path:
 
 def ensure_topic_layout(data_dir: Path, topic: str) -> list[Path]:
     created: list[Path] = []
-    topic_dir = topic_dir_path(data_dir, topic)
-    if not topic_dir.exists():
-        topic_dir.mkdir(parents=True, exist_ok=True)
-        created.append(topic_dir)
-    else:
-        topic_dir.mkdir(parents=True, exist_ok=True)
+    normalized_topic = normalize_topic_for_path(topic)
+    topic_segments = [segment for segment in normalized_topic.split("/") if segment]
+    for depth in range(1, len(topic_segments) + 1):
+        topic_dir = data_dir / "topics" / Path(*topic_segments[:depth])
+        if not topic_dir.exists():
+            topic_dir.mkdir(parents=True, exist_ok=True)
+            created.append(topic_dir)
+        else:
+            topic_dir.mkdir(parents=True, exist_ok=True)
 
-    scope_path = topic_dir / "scope.txt"
-    if not scope_path.exists():
-        scope_path.write_text(TOPIC_SCOPE_TEMPLATE, encoding="utf-8")
-        created.append(scope_path)
+        scope_path = topic_dir / "scope.txt"
+        if not scope_path.exists():
+            scope_path.write_text(TOPIC_SCOPE_TEMPLATE, encoding="utf-8")
+            created.append(scope_path)
     return created
 
 

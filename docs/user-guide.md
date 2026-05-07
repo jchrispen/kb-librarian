@@ -69,6 +69,8 @@ Use a CLI as the access contract.
 EOF2
 ```
 
+Topics can be nested with slash delimiters, for example `agent-systems/retrieval`.
+
 If you do not provide enough metadata for direct note creation, `kb add` queues the input under `raw/` instead.
 
 ## Ingest Source Material
@@ -192,6 +194,22 @@ Get a summary instead of full markdown:
 ```bash
 kb get 2026-05-04-agent-context-cli-contract --summary --data-dir /path/to/kb
 ```
+
+## Inspect Topics
+
+List topics and direct note counts:
+
+```bash
+kb topics --data-dir /path/to/kb
+```
+
+Render nested topics as a tree:
+
+```bash
+kb topics --tree --data-dir /path/to/kb
+```
+
+When review state exists, these views also include stale/orphan/review counts per topic.
 
 ## Retrieve Task Context
 
