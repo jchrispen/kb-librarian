@@ -29,6 +29,12 @@ ollama pull llama3.2
 
 For deterministic offline development or tests, reconfigure the provider manually to use the codebase's `mock` provider.
 
+## Provider fallback does not run
+
+Fallback is explicit and conservative. It runs only when `providers.policy.fallback.<operation>` is configured and the selected provider exhausts retries for a transient failure such as a timeout, rate limit, transport error, or provider 5xx response.
+
+Fallback intentionally does not run for missing API keys, invalid provider names, malformed provider responses, validation errors, or other non-transient failures. Inspect `.kb/errors.log` for `provider-fallback` entries and run `kb doctor --data-dir <path>` to verify primary and fallback route configuration.
+
 ## Codex provider routes fail
 
 Codex-compatible routes use `providers.codex.api_key_env` and `providers.codex.base_url`.

@@ -56,6 +56,9 @@ providers:
     base_delay_seconds: 0.25
     max_delay_seconds: 2.0
     jitter_seconds: 0.1
+  policy:
+    default_provider: anthropic
+    fallback: {}
 
 operations:
   extract:    { provider: anthropic, model: claude-sonnet-4-6 }
@@ -191,6 +194,28 @@ ollama pull llama3.2
 - `jitter_seconds`: random jitter added to each retry delay
 
 Transient failures (for example timeouts, rate limits, and provider 5xx responses) are retried. Non-transient schema/validation failures stop without retry.
+
+`providers.policy` controls deterministic provider selection and explicit fallback:
+
+- `default_provider`: provider used when an operation omits `provider`
+- `fallback`: per-operation list of fallback providers to try after the selected provider exhausts retry attempts for a transient failure
+
+Fallback entries can be provider names, which reuse the operation model, or mappings with an explicit model:
+
+```yaml
+providers:
+  policy:
+    default_provider: anthropic
+    fallback:
+      synthesize:
+        - provider: local
+          model: llama3.2
+      extract:
+        - provider: codex
+          model: gpt-5.1-codex
+```
+
+Fallback never runs for configuration errors, missing credentials, provider response schema errors, or other non-transient failures. Provider attempts are bounded by the configured fallback list and each attempted provider uses `providers.retry` independently. `kb doctor` validates fallback references and checks configured fallback providers such as Codex credentials or local Ollama reachability.
 
 ## Git Automation
 

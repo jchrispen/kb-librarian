@@ -136,7 +136,7 @@ Use `--quiet` when only errors should be printed.
 
 Ingest holds `.kb/ingest.lock` while mutating KB state and records progress in `.kb/state.json`. If another ingest is active, the command refuses to process files. If a lock or checkpoint is stale after an interruption, prefer `--resume`; use `--force` only when you want to discard stale recovery state and start a new ingest.
 
-Provider-backed ingest calls use configurable retry/backoff (`providers.retry`) for transient failures. Retry attempts and final-stop reasons are appended to `.kb/errors.log`.
+Provider-backed ingest calls use configurable retry/backoff (`providers.retry`) for transient failures. When `providers.policy.fallback` is configured for an operation, fallback runs only after the selected provider exhausts retries for a transient failure. Retry attempts, fallback decisions, and final-stop reasons are appended to `.kb/errors.log`.
 
 If `git.auto_commit` and `git.commit_ingests` are enabled, successful ingest runs create a git commit after all notes, review items, raw archives, indexes, and automation diagnostics are written. Auto-commit stays off by default, and skipped commits print an explicit reason.
 
@@ -175,7 +175,7 @@ Run `kb doctor` when retrieval looks stale, after manual edits, after a sync con
 kb doctor --data-dir /path/to/kb
 ```
 
-Doctor prints grouped `ok`, `warn`, and `error` findings. Errors produce a nonzero exit code. Warnings usually point to rebuildable generated state or provider setup that only matters when running provider-backed commands.
+Doctor prints grouped `ok`, `warn`, and `error` findings. Errors produce a nonzero exit code. Warnings usually point to rebuildable generated state or provider setup that only matters when running provider-backed commands. Provider diagnostics include primary routes and any explicit fallback routes.
 
 For a fast offline confidence check of the local package:
 

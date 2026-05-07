@@ -2,7 +2,9 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
-Status: Pending
+Status: Complete
+
+Completed: 2026-05-07
 
 ## Goal
 
@@ -80,3 +82,32 @@ Add an explicit, deterministic provider-selection policy with bounded fallback b
 - Dynamic runtime scoring of providers.
 - Cost-based automatic provider optimization.
 - Embedding retrieval implementation.
+
+## Completion Record
+
+Completed on 2026-05-07.
+
+Implemented files:
+
+- `src/kb_librarian/config.py`
+- `src/kb_librarian/providers.py`
+- `src/kb_librarian/ingest.py`
+- `src/kb_librarian/context.py`
+- `src/kb_librarian/compaction.py`
+- `src/kb_librarian/doctor.py`
+- `tests/test_config.py`
+- `tests/test_providers.py`
+- `tests/test_ingest.py`
+- `tests/test_doctor.py`
+- `README.md`
+- `docs/configuration.md`
+- `docs/commands.md`
+- `docs/user-guide.md`
+- `docs/troubleshooting.md`
+- `docs/superpowers/plan/05-provider-expansion-and-local-first.md`
+- `docs/superpowers/plan/05c-provider-policy-and-fallback.md`
+
+Verification:
+
+- `pytest -q tests/test_config.py tests/test_providers.py tests/test_ingest.py tests/test_context.py tests/test_compaction.py tests/test_doctor.py` - passed, 85 passed, 2 skipped.
+- `pytest -q` - passed, 181 passed, 3 skipped.

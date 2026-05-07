@@ -43,7 +43,7 @@ kb doctor [--data-dir <path>] [--self-test]
 
 `kb doctor` groups findings by subsystem and prints `ok`, `warn`, or `error` severities. It returns nonzero when any `error` finding is present.
 
-Checks include required layout, config validity, note schema validity, duplicate IDs, broken note ID references, review state readability, ingest lock/checkpoint recovery state, markdown index freshness, backlinks, manifest freshness, lexical index freshness, raw ingest errors, parser dependency availability, auto-commit configuration, provider route presence, Codex credential presence when any operation routes to `provider: codex`, and local-provider reachability when any operation routes to `provider: local`.
+Checks include required layout, config validity, note schema validity, duplicate IDs, broken note ID references, review state readability, ingest lock/checkpoint recovery state, markdown index freshness, backlinks, manifest freshness, lexical index freshness, raw ingest errors, parser dependency availability, auto-commit configuration, provider route and fallback policy presence, Codex credential presence when any primary or fallback route uses `provider: codex`, and local-provider reachability when any primary or fallback route uses `provider: local`.
 
 `kb doctor --self-test` creates a temporary KB, configures the deterministic mock provider, ingests one tiny fixture, rebuilds indexes, searches it, and runs doctor against the fixture. It is offline and does not mutate your configured KB.
 
@@ -109,7 +109,7 @@ Human-readable and JSON reports include outcome counts, created/appended note ID
 
 `kb ingest` writes `.kb/ingest.lock` while it is mutating raw files, notes, review state, or indexes. A second ingest exits without processing. If an earlier ingest was interrupted, run `kb ingest --resume`; use `--force` only when you intend to discard a stale lock/checkpoint and start over.
 
-Provider-backed ingest phases use configurable retry/backoff (`providers.retry`) for transient failures and log retry/final-stop diagnostics to `.kb/errors.log`.
+Provider-backed ingest phases use configurable retry/backoff (`providers.retry`) for transient failures, then apply explicit `providers.policy.fallback` routes when configured. Retry, fallback, and final-stop diagnostics are logged to `.kb/errors.log`.
 
 When `git.auto_commit` and `git.commit_ingests` are enabled, successful ingests are committed after completion. JSON output includes an `auto_commit` object with attempted/committed status, message, commit SHA, and paths.
 
@@ -203,7 +203,7 @@ Supported modes:
 
 Human-readable and JSON output include citation metadata by default.
 
-`kb context` uses configurable provider retry/backoff for synthesis failures. Retry attempts and final-stop reasons are appended to `.kb/errors.log`.
+`kb context` uses configurable provider retry/backoff for synthesis failures and applies explicit `providers.policy.fallback.synthesize` routes after transient exhausted-retry failures. Retry attempts, fallback decisions, and final-stop reasons are appended to `.kb/errors.log`.
 
 Context and exploration retrievals are logged to `.kb/usage.log` without note bodies. Empty retrievals are logged as search misses, and `--report-miss` records an explicit poor-result signal.
 
@@ -242,7 +242,7 @@ kb usage [--since <duration>] [--note <id>] [--data-dir <path>]
 
 ## Current Command Surface
 
-The current shipped CLI includes the full Phase 1-4 command surface: ingest lock/resume, provider retry/backoff, golden corpus checks, PDF/HTML ingest, opt-in hook/scheduler templates, guarded optional auto-commit, and final diagnostics.
+The current shipped CLI includes the full Phase 1-4 command surface plus Phase 5 provider routing: ingest lock/resume, provider retry/backoff, explicit provider fallback policy, golden corpus checks, PDF/HTML ingest, opt-in hook/scheduler templates, guarded optional auto-commit, and final diagnostics.
 
 ## Golden Corpus Regression Harness
 

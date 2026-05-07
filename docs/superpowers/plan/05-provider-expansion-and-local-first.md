@@ -14,8 +14,8 @@ Phase 5 assumes Phases 1-4 are complete.
 |---|---|---|
 | [05a - Local Provider Core](05a-local-provider-core.md) | Complete | Added an Ollama local provider adapter, config validation, routed operation support, diagnostics, docs, and tests. |
 | [05b - Codex Provider Support](05b-codex-provider-support.md) | Complete | Added a Codex-compatible Responses API provider adapter, config validation, routed operation support, diagnostics, docs, and tests. |
-| [05c - Provider Policy and Fallback](05c-provider-policy-and-fallback.md) | Next | Add explicit provider selection policy and bounded fallback behavior with clear diagnostics. |
-| [05d - Embedding Retrieval Seams](05d-embedding-retrieval-seams.md) | Pending | Add retrieval/config/index seams to enable future embedding retrieval without shipping it yet. |
+| [05c - Provider Policy and Fallback](05c-provider-policy-and-fallback.md) | Complete | Added explicit default-provider policy, bounded per-operation fallback, provider-policy execution, diagnostics, docs, and tests. |
+| [05d - Embedding Retrieval Seams](05d-embedding-retrieval-seams.md) | Next | Add retrieval/config/index seams to enable future embedding retrieval without shipping it yet. |
 
 ## Milestone Order
 
