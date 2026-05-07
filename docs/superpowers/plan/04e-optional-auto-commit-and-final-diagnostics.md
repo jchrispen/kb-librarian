@@ -2,6 +2,9 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
+Status: Complete
+Completed: 2026-05-07
+
 ## Goal
 
 Add explicit automation around git commits without weakening the default trust posture, and finish the remaining diagnostic polish across recovery flows. At the end of this milestone, users can opt into carefully scoped auto-commit behavior, and the system reports recovery, dependency, and automation issues clearly.
@@ -70,6 +73,41 @@ Add explicit automation around git commits without weakening the default trust p
 - Worktree-safety rules prevent noisy or unsafe automatic commits.
 - `kb doctor` reports recovery and automation issues clearly.
 - Operation and recovery messages are consistent across robustness flows.
+
+## Completion Record
+
+Implemented files:
+
+- `src/kb_librarian/git_auto.py`
+- `src/kb_librarian/cli.py`
+- `src/kb_librarian/config.py`
+- `src/kb_librarian/doctor.py`
+- `tests/test_git_auto.py`
+- `tests/test_cli.py`
+- `tests/test_config.py`
+- `tests/test_doctor.py`
+- `README.md`
+- `docs/commands.md`
+- `docs/configuration.md`
+- `docs/troubleshooting.md`
+- `docs/user-guide.md`
+
+Behavior shipped:
+
+- Added guarded `git.auto_commit` support with scoped policy keys for ingests, reviews, reindexes, topic reorganizations, and unrelated-change handling.
+- Wired successful ingest/add, review accept, compaction proposal, reindex, and topic mutation/proposal commands to optional post-operation commits.
+- Added conservative worktree checks, operation-oriented commit messages, CLI/JSON auto-commit reporting, and `.kb/errors.log` automation diagnostics.
+- Expanded `kb doctor` with parser dependency and auto-commit configuration findings.
+- Documented auto-commit configuration, command behavior, doctor coverage, and troubleshooting.
+
+Verification:
+
+- `pytest -q tests/test_git_auto.py tests/test_config.py tests/test_doctor.py tests/test_cli.py::test_kb_ingest_mock_provider_smoke tests/test_cli.py::test_kb_ingest_auto_commit_smoke` - passed, 19 passed.
+- `pytest -q` - passed, 143 passed, 3 skipped.
+
+Implementation commit:
+
+- `4272a8f Implement optional KB auto-commit policy`
 
 ## Out of Scope
 

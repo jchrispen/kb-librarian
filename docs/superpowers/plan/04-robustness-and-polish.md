@@ -16,7 +16,7 @@ Phase 4 assumes Phases 1-3 are complete.
 | [04b - Provider Retry and Golden Corpus Harness](04b-provider-retry-and-golden-corpus-harness.md) | Complete | Added configurable retry/backoff, provider failure diagnostics, deterministic golden corpus harness, and opt-in live-provider smoke checks. |
 | [04c - PDF and HTML Ingest Parsing](04c-pdf-and-html-ingest-parsing.md) | Complete | Added local PDF and HTML parsing with parser failure review surfacing and source metadata. |
 | [04d - Hook and Scheduler Templates](04d-hook-and-scheduler-templates.md) | Complete | Added opt-in session-start/scheduler templates under `.kb/hooks/` and explicit manual installation guidance with no auto-registration. |
-| [04e - Optional Auto-Commit and Final Diagnostics](04e-optional-auto-commit-and-final-diagnostics.md) | Next | Adds guarded auto-commit policy and phase-level diagnostic polish across recovery flows. |
+| [04e - Optional Auto-Commit and Final Diagnostics](04e-optional-auto-commit-and-final-diagnostics.md) | Complete | Added guarded auto-commit policy, scoped commit controls, CLI/JSON reporting, and final doctor diagnostics. |
 
 ## Milestone Order
 
@@ -28,7 +28,7 @@ Phase 4 assumes Phases 1-3 are complete.
    - Extends local ingest coverage to richer source formats while preserving inspectable failure modes.
 4. [04d - Hook and Scheduler Templates](04d-hook-and-scheduler-templates.md) - complete
    - Generates optional automation templates while keeping the default posture conservative and manual.
-5. [04e - Optional Auto-Commit and Final Diagnostics](04e-optional-auto-commit-and-final-diagnostics.md) - next
+5. [04e - Optional Auto-Commit and Final Diagnostics](04e-optional-auto-commit-and-final-diagnostics.md) - complete
    - Adds explicit automation policy for commits and closes recovery gaps in user-facing diagnostics.
 
 Each milestone should leave the CLI runnable and covered by focused tests. Later milestones may adjust earlier code, but they should preserve accepted Phase 1-3 behavior and the public interfaces already shipped in earlier Phase 4 milestones.
