@@ -186,6 +186,29 @@ def test_doctor_reports_local_provider_reachable_when_routed(tmp_path, monkeypat
     assert "local-provider-reachable" in rendered
 
 
+def test_doctor_checks_fallback_provider_routes(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    config = _mock_config(tmp_path)
+    config["providers"]["policy"]["fallback"] = {
+        "synthesize": [
+            {"provider": "local", "model": "llama3.2"},
+        ]
+    }
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    monkeypatch.setattr(
+        "kb_librarian.doctor.local_provider_status",
+        lambda *args, **kwargs: LocalProviderStatus(False, [], "Ollama backend is unreachable."),
+    )
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 1
+    assert "provider-policy" in rendered
+    assert "local-provider-unreachable" in rendered
+
+
 def test_doctor_reports_codex_api_key_warning_when_routed(tmp_path):
     initialize_data_dir(tmp_path)
     config = default_config(tmp_path)

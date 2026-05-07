@@ -9,12 +9,20 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol, TypeVar
 
 from kb_librarian.errors import ProviderError
 from kb_librarian.notes import CONFIDENCE_LEVELS, KNOWLEDGE_TYPES
+from kb_librarian.provider_retry import (
+    RetryEvent,
+    RetryPolicy,
+    call_with_retry,
+    classify_provider_failure,
+)
 from kb_librarian.storage import normalize_topic_for_path
 
+
+T = TypeVar("T")
 
 UTILITY_SCORES = {"high", "medium", "low"}
 INTEGRATION_VERDICTS = {"identical", "adds_nuance", "contradicts", "unrelated"}
@@ -55,6 +63,18 @@ class ClassificationResult:
 class OperationRoute:
     provider: str
     model: str
+
+
+@dataclass(frozen=True)
+class ProviderFallbackEvent:
+    operation: str
+    provider: str
+    model: str
+    next_provider: str
+    next_model: str
+    classification_kind: str
+    classification_detail: str
+    error: ProviderError
 
 
 @dataclass(frozen=True)
@@ -133,6 +153,10 @@ class LLMProvider(Protocol):
 
 
 def operation_route(config: Mapping[str, Any], operation: str) -> OperationRoute:
+    return operation_routes(config, operation)[0]
+
+
+def operation_routes(config: Mapping[str, Any], operation: str) -> list[OperationRoute]:
     operations = config.get("operations")
     if not isinstance(operations, Mapping):
         raise ProviderError("Config section operations must be a mapping.")
@@ -140,13 +164,86 @@ def operation_route(config: Mapping[str, Any], operation: str) -> OperationRoute
     if not isinstance(raw, Mapping):
         raise ProviderError(f"Config operation {operation!r} must be a mapping.")
 
-    provider = raw.get("provider")
+    provider = _operation_provider(config, raw)
     model = raw.get("model")
     if not isinstance(provider, str) or not provider.strip():
-        raise ProviderError(f"Config operation {operation!r} requires a provider.")
+        raise ProviderError(
+            f"Config operation {operation!r} requires a provider or providers.policy.default_provider."
+        )
     if not isinstance(model, str) or not model.strip():
         raise ProviderError(f"Config operation {operation!r} requires a model.")
-    return OperationRoute(provider=provider.strip(), model=model.strip())
+    primary = OperationRoute(provider=provider.strip(), model=model.strip())
+    return [primary, *_fallback_routes(config, operation, model=model.strip())]
+
+
+def call_with_provider_policy(
+    config: Mapping[str, Any],
+    operation: str,
+    *,
+    operation_name: str,
+    retry_policy: RetryPolicy,
+    call: Callable[[LLMProvider, OperationRoute], T],
+    env: Mapping[str, str] | None = None,
+    provider_factory: Callable[..., LLMProvider] | None = None,
+    on_retry: Callable[[RetryEvent], None] | None = None,
+    on_final_failure: Callable[[RetryEvent], None] | None = None,
+    on_fallback: Callable[[ProviderFallbackEvent], None] | None = None,
+) -> T:
+    """Run a provider-backed call through deterministic selection and fallback policy."""
+
+    routes = operation_routes(config, operation)
+    factory = provider_from_config if provider_factory is None else provider_factory
+    attempted: list[OperationRoute] = []
+    last_error: ProviderError | None = None
+    last_kind = "not_attempted"
+    last_detail = "no_attempts"
+
+    for index, route in enumerate(routes):
+        attempted.append(route)
+        try:
+            provider = factory(config, route.provider, env=env)
+            return call_with_retry(
+                _policy_attempt_name(operation_name, route),
+                lambda: call(provider, route),
+                policy=retry_policy,
+                on_retry=on_retry,
+                on_final_failure=on_final_failure,
+            )
+        except ProviderError as error:
+            last_error = error
+            classification = classify_provider_failure(error)
+            last_kind = classification.kind
+            last_detail = classification.detail
+            has_fallback = index < len(routes) - 1
+            if classification.transient and has_fallback:
+                next_route = routes[index + 1]
+                if on_fallback is not None:
+                    on_fallback(
+                        ProviderFallbackEvent(
+                            operation=operation_name,
+                            provider=route.provider,
+                            model=route.model,
+                            next_provider=next_route.provider,
+                            next_model=next_route.model,
+                            classification_kind=classification.kind,
+                            classification_detail=classification.detail,
+                            error=error,
+                        )
+                    )
+                continue
+            break
+
+    attempted_text = ", ".join(f"{route.provider}({route.model})" for route in attempted)
+    stop_reason = f"{last_kind}:{last_detail}"
+    if last_error is None:
+        raise ProviderError(
+            f"Provider policy for operation {operation_name!r} had no provider attempts "
+            f"(stop_reason={stop_reason})."
+        )
+    raise ProviderError(
+        f"Provider policy for operation {operation_name!r} stopped after provider attempts "
+        f"[{attempted_text}] (stop_reason={stop_reason}). Last error: {last_error}"
+    ) from last_error
 
 
 def provider_from_config(
@@ -216,6 +313,64 @@ def provider_from_config(
         return LocalOllamaProvider(base_url=base_url, timeout_seconds=timeout)
 
     raise ProviderError(f"Unsupported provider {provider_name!r}.")
+
+
+def _operation_provider(config: Mapping[str, Any], route: Mapping[str, Any]) -> str | None:
+    configured = route.get("provider")
+    if isinstance(configured, str) and configured.strip():
+        return configured.strip()
+    providers = config.get("providers")
+    if not isinstance(providers, Mapping):
+        return None
+    policy = providers.get("policy")
+    if not isinstance(policy, Mapping):
+        return None
+    default_provider = policy.get("default_provider")
+    if isinstance(default_provider, str) and default_provider.strip():
+        return default_provider.strip()
+    return None
+
+
+def _fallback_routes(config: Mapping[str, Any], operation: str, *, model: str) -> list[OperationRoute]:
+    providers = config.get("providers")
+    if not isinstance(providers, Mapping):
+        return []
+    policy = providers.get("policy")
+    if not isinstance(policy, Mapping):
+        return []
+    fallback = policy.get("fallback")
+    if not isinstance(fallback, Mapping):
+        return []
+    entries = fallback.get(operation, [])
+    if entries is None:
+        return []
+    if not isinstance(entries, list):
+        raise ProviderError(f"Config providers.policy.fallback.{operation} must be a list.")
+
+    routes: list[OperationRoute] = []
+    for index, entry in enumerate(entries):
+        if isinstance(entry, str):
+            provider = entry.strip()
+            fallback_model = model
+        elif isinstance(entry, Mapping):
+            provider_value = entry.get("provider")
+            provider = provider_value.strip() if isinstance(provider_value, str) else ""
+            model_value = entry.get("model")
+            fallback_model = model_value.strip() if isinstance(model_value, str) and model_value.strip() else model
+        else:
+            provider = ""
+            fallback_model = model
+        if not provider:
+            raise ProviderError(
+                f"Config providers.policy.fallback.{operation}[{index}] must be a provider string "
+                "or a mapping with provider."
+            )
+        routes.append(OperationRoute(provider=provider, model=fallback_model))
+    return routes
+
+
+def _policy_attempt_name(operation_name: str, route: OperationRoute) -> str:
+    return f"{operation_name}[provider={route.provider}]"
 
 
 def local_provider_status(

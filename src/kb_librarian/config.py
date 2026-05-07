@@ -20,6 +20,9 @@ from kb_librarian.paths import (
     is_library_dir_next_to_control_dir,
 )
 
+PROVIDER_CONTROL_KEYS = {"retry", "policy"}
+MAX_PROVIDER_FALLBACKS_PER_OPERATION = 4
+
 REQUIRED_TOP_LEVEL_KEYS = (
     "data_dir",
     "providers",
@@ -95,6 +98,10 @@ def default_config(data_dir: str | Path | None = None, *, hooks: bool = False) -
                 "base_delay_seconds": 0.25,
                 "max_delay_seconds": 2.0,
                 "jitter_seconds": 0.1,
+            },
+            "policy": {
+                "default_provider": "anthropic",
+                "fallback": {},
             },
         },
         "operations": {
@@ -323,6 +330,8 @@ def validate_config(config: Mapping[str, Any]) -> None:
         if max_delay < base_delay:
             raise ConfigError("Config key providers.retry.max_delay_seconds must be >= base_delay_seconds.")
 
+    _validate_provider_policy(config)
+
     providers = config["providers"]
     for operation in REQUIRED_SECTION_KEYS["operations"]:
         route = config["operations"][operation]
@@ -330,12 +339,16 @@ def validate_config(config: Mapping[str, Any]) -> None:
             raise ConfigError(f"Config operation {operation} must be a mapping.")
         provider = route.get("provider")
         model = route.get("model")
-        if not isinstance(provider, str) or not provider.strip():
-            raise ConfigError(f"Config operation {operation}.provider must be a non-empty string.")
+        if provider is not None and (not isinstance(provider, str) or not provider.strip()):
+            raise ConfigError(f"Config operation {operation}.provider must be a non-empty string when present.")
         if not isinstance(model, str) or not model.strip():
             raise ConfigError(f"Config operation {operation}.model must be a non-empty string.")
-        if provider not in providers:
+        if provider is not None and provider.strip() not in _adapter_provider_names(providers):
             raise ConfigError(f"Config operation {operation} references unknown provider {provider!r}.")
+        if provider is None and _policy_default_provider(providers) is None:
+            raise ConfigError(
+                f"Config operation {operation}.provider is required when providers.policy.default_provider is unset."
+            )
 
     indexes = config["indexes"]
     for key in ("topic_page_size", "top_level_page_size"):
@@ -384,3 +397,108 @@ def _validate_positive_number(section: Mapping[str, Any], key: str) -> None:
     value = section[leaf]
     if isinstance(value, bool) or not isinstance(value, (int, float)) or float(value) <= 0:
         raise ConfigError(f"Config key {key} must be a number > 0.")
+
+
+def _validate_provider_policy(config: Mapping[str, Any]) -> None:
+    providers = config["providers"]
+    operations = config["operations"]
+    if not isinstance(providers, Mapping) or not isinstance(operations, Mapping):
+        return
+
+    policy = providers.get("policy")
+    if policy is None:
+        return
+    if not isinstance(policy, Mapping):
+        raise ConfigError("Config section providers.policy must be a mapping when present.")
+
+    adapter_names = _adapter_provider_names(providers)
+    default_provider = policy.get("default_provider")
+    if default_provider is not None:
+        if not isinstance(default_provider, str) or not default_provider.strip():
+            raise ConfigError("Config key providers.policy.default_provider must be a non-empty string when present.")
+        if default_provider.strip() not in adapter_names:
+            raise ConfigError(
+                f"Config key providers.policy.default_provider references unknown provider {default_provider!r}."
+            )
+
+    fallback = policy.get("fallback", {})
+    if fallback is None:
+        fallback = {}
+    if not isinstance(fallback, Mapping):
+        raise ConfigError("Config section providers.policy.fallback must be a mapping when present.")
+
+    for operation, entries in fallback.items():
+        if operation not in REQUIRED_SECTION_KEYS["operations"]:
+            raise ConfigError(f"Config providers.policy.fallback has unknown operation {operation!r}.")
+        if not isinstance(entries, list):
+            raise ConfigError(f"Config providers.policy.fallback.{operation} must be a list.")
+        if len(entries) > MAX_PROVIDER_FALLBACKS_PER_OPERATION:
+            raise ConfigError(
+                f"Config providers.policy.fallback.{operation} must contain at most "
+                f"{MAX_PROVIDER_FALLBACKS_PER_OPERATION} providers."
+            )
+
+        primary = _operation_provider(operations[operation], providers)
+        sequence: list[str] = [primary] if primary is not None else []
+        for index, entry in enumerate(entries):
+            provider = _fallback_entry_provider(operation, index, entry)
+            if provider not in adapter_names:
+                raise ConfigError(
+                    f"Config providers.policy.fallback.{operation}[{index}] references unknown provider {provider!r}."
+                )
+            sequence.append(provider)
+            if isinstance(entry, Mapping):
+                model = entry.get("model")
+                if model is not None and (not isinstance(model, str) or not model.strip()):
+                    raise ConfigError(
+                        f"Config providers.policy.fallback.{operation}[{index}].model "
+                        "must be a non-empty string when present."
+                    )
+
+        for left, right in zip(sequence, sequence[1:]):
+            if left == right:
+                raise ConfigError(
+                    f"Config providers.policy.fallback.{operation} contains duplicate consecutive provider {left!r}."
+                )
+        if len(set(sequence)) != len(sequence):
+            raise ConfigError(f"Config providers.policy.fallback.{operation} contains a provider cycle.")
+
+
+def _adapter_provider_names(providers: Mapping[str, Any]) -> set[str]:
+    return {
+        str(provider_name)
+        for provider_name, provider_config in providers.items()
+        if provider_name not in PROVIDER_CONTROL_KEYS and isinstance(provider_config, Mapping)
+    }
+
+
+def _policy_default_provider(providers: Mapping[str, Any]) -> str | None:
+    policy = providers.get("policy")
+    if not isinstance(policy, Mapping):
+        return None
+    provider = policy.get("default_provider")
+    if not isinstance(provider, str) or not provider.strip():
+        return None
+    return provider.strip()
+
+
+def _operation_provider(route: Any, providers: Mapping[str, Any]) -> str | None:
+    if not isinstance(route, Mapping):
+        return None
+    provider = route.get("provider")
+    if isinstance(provider, str) and provider.strip():
+        return provider.strip()
+    return _policy_default_provider(providers)
+
+
+def _fallback_entry_provider(operation: str, index: int, entry: Any) -> str:
+    if isinstance(entry, str) and entry.strip():
+        return entry.strip()
+    if isinstance(entry, Mapping):
+        provider = entry.get("provider")
+        if isinstance(provider, str) and provider.strip():
+            return provider.strip()
+    raise ConfigError(
+        f"Config providers.policy.fallback.{operation}[{index}] must be a provider string "
+        "or a mapping with provider."
+    )

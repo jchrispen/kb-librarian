@@ -8,12 +8,16 @@ import urllib.error
 import pytest
 
 from kb_librarian.provider_retry import classify_provider_failure
+from kb_librarian.config import default_config
 from kb_librarian.errors import ProviderError
 from kb_librarian.providers import (
     CodexProvider,
     LocalOllamaProvider,
     MockProvider,
+    call_with_provider_policy,
     local_provider_status,
+    operation_route,
+    operation_routes,
     parse_json_response,
     provider_from_config,
     validate_classification_payload,
@@ -148,6 +152,108 @@ def test_mock_provider_synthesize_exploration_has_explore_sections():
     assert "## Tensions / tradeoffs" in result
     assert "## Open questions" in result
     assert "[2026-05-04-token-budget-pattern]" in result
+
+
+def test_operation_routes_use_policy_default_and_fallback(tmp_path):
+    config = default_config(tmp_path)
+    del config["operations"]["extract"]["provider"]
+    config["providers"]["mock"] = {}
+    config["providers"]["policy"]["default_provider"] = "local"
+    config["providers"]["policy"]["fallback"] = {
+        "extract": [
+            {"provider": "mock", "model": "mock-extract"},
+        ]
+    }
+
+    routes = operation_routes(config, "extract")
+
+    assert operation_route(config, "extract").provider == "local"
+    assert [(route.provider, route.model) for route in routes] == [
+        ("local", "claude-sonnet-4-6"),
+        ("mock", "mock-extract"),
+    ]
+
+
+def test_call_with_provider_policy_falls_back_after_transient_failure(tmp_path):
+    config = default_config(tmp_path)
+    config["providers"]["primary"] = {}
+    config["providers"]["fallback"] = {}
+    config["operations"]["synthesize"] = {"provider": "primary", "model": "primary-model"}
+    config["providers"]["policy"]["fallback"] = {
+        "synthesize": [
+            {"provider": "fallback", "model": "fallback-model"},
+        ]
+    }
+    policy = config["providers"]["retry"] = {
+        "max_attempts": 1,
+        "base_delay_seconds": 0.0,
+        "max_delay_seconds": 0.0,
+        "jitter_seconds": 0.0,
+    }
+    attempts = []
+    fallbacks = []
+
+    class Provider:
+        pass
+
+    def provider_factory(_config, provider_name, **kwargs):  # noqa: ANN001
+        attempts.append(provider_name)
+        return Provider()
+
+    def call(provider, route):  # noqa: ANN001
+        if route.provider == "primary":
+            raise ProviderError("service unavailable")
+        return f"{route.provider}:{route.model}"
+
+    from kb_librarian.provider_retry import retry_policy_from_config
+
+    result = call_with_provider_policy(
+        config,
+        "synthesize",
+        operation_name="context:synthesize",
+        retry_policy=retry_policy_from_config({"providers": {"retry": policy}}),
+        call=call,
+        provider_factory=provider_factory,
+        on_fallback=fallbacks.append,
+    )
+
+    assert result == "fallback:fallback-model"
+    assert attempts == ["primary", "fallback"]
+    assert fallbacks[0].provider == "primary"
+    assert fallbacks[0].next_provider == "fallback"
+
+
+def test_call_with_provider_policy_does_not_fallback_after_non_transient_failure(tmp_path):
+    config = default_config(tmp_path)
+    config["providers"]["primary"] = {}
+    config["providers"]["fallback"] = {}
+    config["operations"]["synthesize"] = {"provider": "primary", "model": "primary-model"}
+    config["providers"]["policy"]["fallback"] = {"synthesize": ["fallback"]}
+    attempts = []
+
+    class Provider:
+        pass
+
+    def provider_factory(_config, provider_name, **kwargs):  # noqa: ANN001
+        attempts.append(provider_name)
+        return Provider()
+
+    def call(provider, route):  # noqa: ANN001
+        raise ProviderError("Provider response was not valid JSON")
+
+    from kb_librarian.provider_retry import retry_policy_from_config
+
+    with pytest.raises(ProviderError, match="attempts \\[primary\\(primary-model\\)\\]"):
+        call_with_provider_policy(
+            config,
+            "synthesize",
+            operation_name="context:synthesize",
+            retry_policy=retry_policy_from_config({"providers": {"retry": {"max_attempts": 1}}}),
+            call=call,
+            provider_factory=provider_factory,
+        )
+
+    assert attempts == ["primary"]
 
 
 def test_validate_integration_payload():

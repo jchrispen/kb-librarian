@@ -460,6 +460,55 @@ def test_ingest_retries_transient_provider_failure_and_logs_attempts(tmp_path, m
     assert "phase=extract" in errors_log
 
 
+def test_ingest_falls_back_to_configured_provider_after_transient_failure(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    config = configure_mock_provider(tmp_path)
+    config["providers"]["fallback-mock"] = {}
+    config["operations"]["extract"] = {"provider": "mock", "model": "mock-extract"}
+    config["providers"]["retry"] = {
+        "max_attempts": 1,
+        "base_delay_seconds": 0.0,
+        "max_delay_seconds": 0.0,
+        "jitter_seconds": 0.0,
+    }
+    config["providers"]["policy"]["fallback"] = {
+        "extract": [
+            {"provider": "fallback-mock", "model": "mock-extract-fallback"},
+        ]
+    }
+    source = tmp_path / "raw" / "fallback.md"
+    source.write_text(
+        "# Provider fallback\n\nPrefer explicit fallback policy for transient provider failures.\n",
+        encoding="utf-8",
+    )
+
+    class PrimaryProvider(MockProvider):
+        def extract_candidates(self, **kwargs):  # type: ignore[override]
+            raise ProviderError("service unavailable")
+
+    provider_names = []
+    primary = PrimaryProvider()
+    fallback = MockProvider()
+
+    def _provider_from_config(config, provider_name, **kwargs):  # noqa: ANN001
+        provider_names.append(provider_name)
+        if provider_name == "mock":
+            return primary
+        return fallback
+
+    monkeypatch.setattr("kb_librarian.ingest.provider_from_config", _provider_from_config)
+
+    report = ingest(tmp_path, config=config)
+
+    assert report.errors == 0
+    assert len(report.created_notes) == 1
+    assert provider_names[:2] == ["mock", "fallback-mock"]
+    errors_log = (tmp_path / ".kb" / "errors.log").read_text(encoding="utf-8")
+    assert "stage=provider-fallback" in errors_log
+    assert "from=mock" in errors_log
+    assert "to=fallback-mock" in errors_log
+
+
 def test_ingest_routes_extract_classify_integrate_to_local_provider(tmp_path, monkeypatch):
     initialize_data_dir(tmp_path)
     config = local_ingest_config(tmp_path)

@@ -24,6 +24,9 @@ def test_default_config_contains_phase_1_sections(tmp_path):
 
     assert "providers:" in rendered
     assert "retry:" in rendered
+    assert "policy:" in rendered
+    assert "default_provider: anthropic" in rendered
+    assert "fallback: {}" in rendered
     assert "codex:" in rendered
     assert "api_key_env: OPENAI_API_KEY" in rendered
     assert "local:" in rendered
@@ -139,6 +142,57 @@ def test_validate_config_rejects_invalid_provider_retry_settings(tmp_path):
     config["providers"]["retry"]["base_delay_seconds"] = 1.0
     config["providers"]["retry"]["max_delay_seconds"] = 0.2
     with pytest.raises(ConfigError, match="max_delay_seconds"):
+        validate_config(config)
+
+
+def test_validate_config_allows_provider_policy_default_route(tmp_path):
+    config = default_config(tmp_path)
+    del config["operations"]["classify"]["provider"]
+
+    validate_config(config)
+
+
+def test_validate_config_accepts_provider_fallback_routes(tmp_path):
+    config = default_config(tmp_path)
+    config["providers"]["mock"] = {}
+    config["providers"]["policy"]["fallback"] = {
+        "extract": [
+            {"provider": "mock", "model": "mock-extract"},
+        ]
+    }
+
+    validate_config(config)
+
+
+def test_validate_config_rejects_invalid_provider_policy(tmp_path):
+    config = default_config(tmp_path)
+    config["providers"]["policy"]["default_provider"] = "missing"
+    with pytest.raises(ConfigError, match="default_provider"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["policy"]["fallback"] = {"unknown": ["local"]}
+    with pytest.raises(ConfigError, match="unknown operation"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["policy"]["fallback"] = {"extract": ["missing"]}
+    with pytest.raises(ConfigError, match="unknown provider"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["policy"]["fallback"] = {"extract": ["anthropic"]}
+    with pytest.raises(ConfigError, match="duplicate consecutive"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["policy"]["fallback"] = {
+        "extract": [
+            {"provider": "local", "model": "llama3.2"},
+            {"provider": "anthropic", "model": "claude-sonnet-4-6"},
+        ]
+    }
+    with pytest.raises(ConfigError, match="provider cycle"):
         validate_config(config)
 
 

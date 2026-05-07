@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from kb_librarian.indexing import reindex_data_dir
-from kb_librarian.provider_retry import RetryEvent, call_with_retry, retry_policy_from_config
-from kb_librarian.providers import LLMProvider, operation_route, provider_from_config
+from kb_librarian.provider_retry import RetryEvent, retry_policy_from_config
+from kb_librarian.providers import ProviderFallbackEvent, call_with_provider_policy, provider_from_config
 from kb_librarian.search_index import query_candidates, tokenize_query
 from kb_librarian.storage import NOTE_ID_REFERENCE_PATTERN, NoteRecord, load_note_records
 from kb_librarian.usage import note_usage_counts
@@ -188,18 +188,20 @@ def build_context(
             message="No useful notes found for this task. Try `kb search` for precise lookup.",
         )
 
-    route = operation_route(config, "synthesize")
-    provider: LLMProvider = provider_from_config(config, route.provider, env=env)
-    synthesis = call_with_retry(
-        "context:synthesize",
-        lambda: provider.synthesize_context(
+    synthesis = call_with_provider_policy(
+        config,
+        "synthesize",
+        operation_name="context:synthesize",
+        retry_policy=retry_policy,
+        call=lambda provider, route: provider.synthesize_context(
             task=task,
             mode=mode,
             budget=budget,
             model=route.model,
             selected_notes=[_selection_payload(item) for item in selected],
         ),
-        policy=retry_policy,
+        env=env,
+        provider_factory=provider_from_config,
         on_retry=lambda event: _log_provider_event(data_dir, phase="context", event=event, query=task),
         on_final_failure=lambda event: _log_provider_event(
             data_dir,
@@ -207,6 +209,7 @@ def build_context(
             event=event,
             query=task,
         ),
+        on_fallback=lambda event: _log_provider_fallback_event(data_dir, phase="context", event=event, query=task),
     )
     return ContextResult(
         task=task,
@@ -269,17 +272,19 @@ def build_explore(
     if not selected:
         return _empty_explore_result(problem=problem, budget=budget)
 
-    route = operation_route(config, "synthesize")
-    provider: LLMProvider = provider_from_config(config, route.provider, env=env)
-    synthesis = call_with_retry(
-        "explore:synthesize",
-        lambda: provider.synthesize_exploration(
+    synthesis = call_with_provider_policy(
+        config,
+        "synthesize",
+        operation_name="explore:synthesize",
+        retry_policy=retry_policy,
+        call=lambda provider, route: provider.synthesize_exploration(
             problem=problem,
             budget=budget,
             model=route.model,
             selected_notes=[_selection_payload(item) for item in selected],
         ),
-        policy=retry_policy,
+        env=env,
+        provider_factory=provider_from_config,
         on_retry=lambda event: _log_provider_event(data_dir, phase="explore", event=event, query=problem),
         on_final_failure=lambda event: _log_provider_event(
             data_dir,
@@ -287,6 +292,7 @@ def build_explore(
             event=event,
             query=problem,
         ),
+        on_fallback=lambda event: _log_provider_fallback_event(data_dir, phase="explore", event=event, query=problem),
     )
 
     return ExploreResult(
@@ -327,6 +333,27 @@ def _log_provider_event(
         f"transient={event.classification.transient} "
         f"reason={event.classification.kind}:{event.classification.detail} "
         f"delay={event.delay_seconds:.3f}s query={query!r} error={event.error}\n"
+    )
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(message)
+
+
+def _log_provider_fallback_event(
+    data_dir: Path,
+    *,
+    phase: str,
+    event: ProviderFallbackEvent,
+    query: str,
+) -> None:
+    path = data_dir / ".kb" / "errors.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().isoformat(timespec="seconds")
+    message = (
+        f"{stamp} stage=provider-{phase}-fallback op={event.operation} "
+        f"from={event.provider} model={event.model} "
+        f"to={event.next_provider} next_model={event.next_model} "
+        f"reason={event.classification_kind}:{event.classification_detail} "
+        f"query={query!r} error={event.error}\n"
     )
     with path.open("a", encoding="utf-8") as handle:
         handle.write(message)

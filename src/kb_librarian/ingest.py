@@ -23,12 +23,13 @@ from kb_librarian.ingest_recovery import (
 )
 from kb_librarian.notes import Note, generate_note_id, read_note, write_note
 from kb_librarian.parsers import parse_html, parse_pdf
-from kb_librarian.provider_retry import RetryEvent, call_with_retry, retry_policy_from_config
+from kb_librarian.provider_retry import RetryEvent, retry_policy_from_config
 from kb_librarian.providers import (
     CandidateNote,
     ClassificationResult,
     IntegrationResult,
-    operation_route,
+    ProviderFallbackEvent,
+    call_with_provider_policy,
     provider_from_config,
 )
 from kb_librarian.review import (
@@ -437,12 +438,6 @@ def _ingest_one(
 ) -> None:
     retry_policy = retry_policy_from_config(config)
     operation_id = checkpoint.operation_id if checkpoint is not None else None
-    extract_route = operation_route(config, "extract")
-    classify_route = operation_route(config, "classify")
-    integrate_route = operation_route(config, "integrate")
-    extractor = provider_from_config(config, extract_route.provider, env=env)
-    classifier = provider_from_config(config, classify_route.provider, env=env)
-    integrator = provider_from_config(config, integrate_route.provider, env=env)
 
     ingest_config = config.get("ingest", {})
     max_notes = int(ingest_config.get("max_notes_per_doc", 7))
@@ -451,12 +446,14 @@ def _ingest_one(
         parsed=parsed,
         operation_id=operation_id,
         phase="extract",
+        config=config,
+        env=env,
         retry_policy=retry_policy,
-        call=lambda: extractor.extract_candidates(
+        call=lambda provider, route: provider.extract_candidates(
             text=parsed.text,
             source_path=parsed.path,
             max_notes=max_notes,
-            model=extract_route.model,
+            model=route.model,
         ),
     )
     if checkpoint is not None:
@@ -478,13 +475,15 @@ def _ingest_one(
             parsed=parsed,
             operation_id=operation_id,
             phase="classify",
+            config=config,
+            env=env,
             retry_policy=retry_policy,
             candidate_title=candidate.title,
-            call=lambda: classifier.classify_candidate(
+            call=lambda provider, route: provider.classify_candidate(
                 candidate=candidate,
                 text=parsed.text,
                 source_path=parsed.path,
-                model=classify_route.model,
+                model=route.model,
             ),
         )
         if checkpoint is not None:
@@ -523,15 +522,17 @@ def _ingest_one(
                 parsed=parsed,
                 operation_id=operation_id,
                 phase="integrate",
+                config=config,
+                env=env,
                 retry_policy=retry_policy,
                 candidate_title=candidate.title,
-                call=lambda: integrator.integration_verdict(
+                call=lambda provider, route: provider.integration_verdict(
                     candidate=candidate,
                     classification=classification,
                     matches=matches,
                     text=parsed.text,
                     source_path=parsed.path,
-                    model=integrate_route.model,
+                    model=route.model,
                 ),
             )
             target_records = _target_records(matches, records, integration)
@@ -685,6 +686,8 @@ def _provider_call(
     parsed: ParsedInput,
     operation_id: str | None,
     phase: str,
+    config: Mapping[str, Any],
+    env: Mapping[str, str] | None,
     retry_policy: Any,
     call: Any,
     candidate_title: str | None = None,
@@ -720,12 +723,32 @@ def _provider_call(
             file=parsed.path,
         )
 
-    return call_with_retry(
-        f"ingest:{phase}",
-        call,
-        policy=retry_policy,
+    def on_fallback(event: ProviderFallbackEvent) -> None:
+        _log_error(
+            data_dir,
+            (
+                f"Falling back provider phase={phase} {detail}"
+                f"from={event.provider} model={event.model} "
+                f"to={event.next_provider} next_model={event.next_model} "
+                f"reason={event.classification_kind}:{event.classification_detail} "
+                f"error={event.error}"
+            ),
+            operation_id=operation_id,
+            stage="provider-fallback",
+            file=parsed.path,
+        )
+
+    return call_with_provider_policy(
+        config,
+        phase,
+        operation_name=f"ingest:{phase}",
+        retry_policy=retry_policy,
+        call=call,
+        env=env,
+        provider_factory=provider_from_config,
         on_retry=on_retry,
         on_final_failure=on_final_failure,
+        on_fallback=on_fallback,
     )
 
 

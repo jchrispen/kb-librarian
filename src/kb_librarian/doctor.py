@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from kb_librarian.config import default_config, read_config_file, validate_config, write_config_file
-from kb_librarian.errors import ConfigError, KBLibrarianError, NoteParseError, NoteValidationError
+from kb_librarian.errors import ConfigError, KBLibrarianError, NoteParseError, NoteValidationError, ProviderError
 from kb_librarian.git_auto import git_worktree_root
 from kb_librarian.indexing import (
     _build_backlinks,
@@ -25,7 +25,7 @@ from kb_librarian.ingest import ingest
 from kb_librarian.init import initialize_data_dir
 from kb_librarian.notes import read_note
 from kb_librarian.paths import DIRECTORIES, LOG_FILES, REVIEW_STATE_FILE, ROOT_FILES, config_path
-from kb_librarian.providers import local_provider_status
+from kb_librarian.providers import local_provider_status, operation_routes
 from kb_librarian.review import STATE_VERSION, ReviewStateError, validate_review_item
 from kb_librarian.search_index import load_backend, query_candidates
 from kb_librarian.storage import NOTE_ID_REFERENCE_PATTERN, NoteRecord, iter_note_files
@@ -699,23 +699,31 @@ def _check_provider_routes(
 
     warnings_before = _subsystem_count(findings, "Providers", "warn")
     errors_before = _subsystem_count(findings, "Providers", "error")
-    routed_providers = sorted(
-        {
-            str(route.get("provider")).strip()
-            for route in operations.values()
-            if isinstance(route, Mapping) and str(route.get("provider", "")).strip()
+    try:
+        resolved_routes = {
+            operation: operation_routes(config, operation)
+            for operation in operations
+            if isinstance(operation, str)
         }
-    )
-    local_route_models = sorted(
-        {
-            str(route.get("model")).strip()
-            for route in operations.values()
-            if (
-                isinstance(route, Mapping)
-                and str(route.get("provider", "")).strip() == "local"
-                and str(route.get("model", "")).strip()
+    except ProviderError as exc:
+        findings.append(
+            DoctorFinding(
+                "Providers",
+                "error",
+                "provider-policy-invalid",
+                f"Provider policy could not be resolved: {exc}",
             )
-        }
+        )
+        return
+
+    routed_providers = sorted({route.provider for routes in resolved_routes.values() for route in routes})
+    local_route_models = sorted(
+        {route.model for routes in resolved_routes.values() for route in routes if route.provider == "local"}
+    )
+    fallback_operations = sorted(
+        operation
+        for operation, routes in resolved_routes.items()
+        if len(routes) > 1
     )
     for provider_name in routed_providers:
         provider_config = providers.get(provider_name)
@@ -831,6 +839,15 @@ def _check_provider_routes(
         and _subsystem_count(findings, "Providers", "error") == errors_before
     ):
         findings.append(DoctorFinding("Providers", "ok", "provider-routes", "Provider routes are configured."))
+    if fallback_operations:
+        findings.append(
+            DoctorFinding(
+                "Providers",
+                "ok",
+                "provider-policy",
+                "Provider fallback is configured for: " + ", ".join(fallback_operations) + ".",
+            )
+        )
 
 
 def _check_parser_dependencies(findings: list[DoctorFinding]) -> None:

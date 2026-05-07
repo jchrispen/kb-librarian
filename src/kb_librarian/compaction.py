@@ -14,10 +14,11 @@ from kb_librarian.errors import KBLibrarianError
 from kb_librarian.indexing import reindex_data_dir
 from kb_librarian.mutations import atomic_write_note, require_clean_worktree
 from kb_librarian.notes import Note, generate_note_id
-from kb_librarian.provider_retry import RetryEvent, call_with_retry, retry_policy_from_config
+from kb_librarian.provider_retry import RetryEvent, retry_policy_from_config
 from kb_librarian.providers import (
     CompactionDraft,
-    operation_route,
+    ProviderFallbackEvent,
+    call_with_provider_policy,
     provider_from_config,
     validate_compaction_payload,
 )
@@ -225,21 +226,28 @@ def draft_compaction_proposal(
     if len(source_records) < MIN_CLUSTER_NOTES:
         raise KBLibrarianError("Compaction requires at least two source notes.")
 
-    route = operation_route(config, "compact")
-    provider = provider_from_config(config, route.provider)
     retry_policy = retry_policy_from_config(config)
-    payload = call_with_retry(
-        "compact:synthesize",
-        lambda: provider.synthesize_compaction(
+    payload = call_with_provider_policy(
+        config,
+        "compact",
+        operation_name="compact:synthesize",
+        retry_policy=retry_policy,
+        call=lambda provider, route: provider.synthesize_compaction(
             source_notes=[_provider_note_payload(record, data_dir=data_dir) for record in source_records],
             cluster_id=cluster_id,
             model=route.model,
         ),
-        policy=retry_policy,
+        provider_factory=provider_from_config,
         on_retry=lambda event: _log_provider_event(data_dir, phase="compact", event=event, cluster_id=cluster_id),
         on_final_failure=lambda event: _log_provider_event(
             data_dir,
             phase="compact-final",
+            event=event,
+            cluster_id=cluster_id,
+        ),
+        on_fallback=lambda event: _log_provider_fallback_event(
+            data_dir,
+            phase="compact",
             event=event,
             cluster_id=cluster_id,
         ),
@@ -375,6 +383,27 @@ def _log_provider_event(
         f"transient={event.classification.transient} "
         f"reason={event.classification.kind}:{event.classification.detail} "
         f"delay={event.delay_seconds:.3f}s cluster_id={cluster_id!r} error={event.error}\n"
+    )
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(message)
+
+
+def _log_provider_fallback_event(
+    data_dir: Path,
+    *,
+    phase: str,
+    event: ProviderFallbackEvent,
+    cluster_id: str,
+) -> None:
+    path = data_dir / ".kb" / "errors.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().isoformat(timespec="seconds")
+    message = (
+        f"{stamp} stage=provider-{phase}-fallback op={event.operation} "
+        f"from={event.provider} model={event.model} "
+        f"to={event.next_provider} next_model={event.next_model} "
+        f"reason={event.classification_kind}:{event.classification_detail} "
+        f"cluster_id={cluster_id!r} error={event.error}\n"
     )
     with path.open("a", encoding="utf-8") as handle:
         handle.write(message)
