@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from kb_librarian.atomic import atomic_write_text
 from kb_librarian.errors import DuplicateNoteIdError, NoteParseError, NoteValidationError
 from kb_librarian.notes import Note, read_note
 
@@ -70,7 +71,7 @@ def ensure_topic_layout(data_dir: Path, topic: str) -> list[Path]:
 
         scope_path = topic_dir / "scope.txt"
         if not scope_path.exists():
-            scope_path.write_text(TOPIC_SCOPE_TEMPLATE, encoding="utf-8")
+            atomic_write_text(scope_path, TOPIC_SCOPE_TEMPLATE)
             created.append(scope_path)
     return created
 

@@ -132,9 +132,9 @@ Important review files:
 
 - `kb init`: create the KB directory structure and default config
 - `kb add`: create a note directly, or queue raw input when metadata is incomplete
-- `kb ingest`: process markdown or text files into notes or review items
+- `kb ingest`: process markdown or text files into notes or review items, with lock/resume recovery
 - `kb reindex`: rebuild markdown indexes, backlinks, manifest, stats, lexical index, and optionally scan compaction clusters
-- `kb doctor`: inspect config, notes, review state, generated indexes, retrieval state, ingest errors, and provider routes
+- `kb doctor`: inspect config, notes, review state, generated indexes, retrieval state, ingest recovery, errors, and provider routes
 - `kb compact`: draft a review-gated canonical note proposal for a topic or cluster
 - `kb search`: search notes by title, summary, tags, retrieval phrases, and body text
 - `kb get`: inspect one note by ID

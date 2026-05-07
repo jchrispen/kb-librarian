@@ -89,6 +89,12 @@ Process pending files already placed in `raw/`:
 kb ingest --data-dir /path/to/kb
 ```
 
+Resume an interrupted ingest:
+
+```bash
+kb ingest --resume --data-dir /path/to/kb
+```
+
 Current shipped ingest support is:
 
 - `.md`
@@ -111,6 +117,8 @@ kb ingest --json --data-dir /path/to/kb
 ```
 
 Use `--quiet` when only errors should be printed.
+
+Ingest holds `.kb/ingest.lock` while mutating KB state and records progress in `.kb/state.json`. If another ingest is active, the command refuses to process files. If a lock or checkpoint is stale after an interruption, prefer `--resume`; use `--force` only when you want to discard stale recovery state and start a new ingest.
 
 ## Rebuild Indexes
 

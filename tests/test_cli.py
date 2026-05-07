@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -99,6 +100,33 @@ def test_kb_init_smoke_and_idempotency(tmp_path):
     assert (tmp_path / "review" / "pending-merge.md").is_file()
     assert second.returncode == 0
     assert "Already initialized" in second.stdout
+
+
+def test_kb_ingest_refuses_active_lock(tmp_path):
+    init_result = run_cli("init", "--data-dir", str(tmp_path))
+    assert init_result.returncode == 0
+    lock_path = tmp_path / ".kb" / "ingest.lock"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "operation_id": "cli-active-lock",
+                "pid": os.getpid(),
+                "hostname": socket.gethostname(),
+                "command": "kb ingest",
+                "started": "2026-05-07T00:00:00",
+                "data_dir": tmp_path.as_posix(),
+                "current_raw_file": "raw/item.md",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_cli("ingest", "--data-dir", str(tmp_path))
+
+    assert result.returncode == 1
+    assert "Another ingest is already running" in result.stderr
+    assert "operation_id=cli-active-lock" in result.stderr
 
 
 def test_kb_init_hooks_installs_agent_preamble_guidance(tmp_path):

@@ -287,6 +287,7 @@ def _add_ingest_parser(subcommands: argparse._SubParsersAction[argparse.Argument
     parser.add_argument("file", nargs="?", help="Optional markdown/text file to ingest.")
     parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
     parser.add_argument("--force", action="store_true", help="Reprocess even if the raw hash was previously successful.")
+    parser.add_argument("--resume", action="store_true", help="Resume the last interrupted ingest checkpoint.")
     parser.add_argument("--quiet", action="store_true", help="Suppress the success report.")
     parser.add_argument("--json", action="store_true", help="Return machine-readable ingest report output.")
     parser.set_defaults(handler=_handle_ingest)
@@ -391,13 +392,19 @@ def _handle_ingest(args: argparse.Namespace) -> int:
         file_path=args.file,
         force=bool(args.force),
         quiet=bool(args.quiet),
+        resume=bool(args.resume),
     )
     if args.json and not args.quiet:
         print(json.dumps(ingest_report_payload(report), indent=2, sort_keys=True))
     elif not args.quiet:
         print(render_report(report), end="")
     elif report.errors:
-        print(f"error: ingest completed with {report.errors} errors; see {data_dir / '.kb' / 'errors.log'}", file=sys.stderr)
+        print(
+            "error: ingest completed with "
+            f"{report.errors} errors (operation_id={report.operation_id}); "
+            f"rerun `kb ingest --resume --data-dir {data_dir}` or inspect {data_dir / '.kb' / 'errors.log'}",
+            file=sys.stderr,
+        )
     return 1 if report.errors else 0
 
 

@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from kb_librarian.atomic import atomic_write_json, atomic_write_text
 from kb_librarian.errors import KBLibrarianError
 from kb_librarian.notes import KNOWLEDGE_TYPES, Note, body_template, generate_note_id, read_note, write_note
 from kb_librarian.storage import (
@@ -773,7 +774,7 @@ def render_review_queues(data_dir: Path, *, state: Mapping[str, Any] | None = No
         text = _render_queue_file(definition, sorted(queue_items, key=_queue_file_sort_key))
         path = data_dir / "review" / definition.file_name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        atomic_write_text(path, text)
     _render_rejected_items(data_dir, items)
 
 
@@ -869,7 +870,7 @@ def _state_items(state: Mapping[str, Any]) -> list[dict[str, Any]]:
 def _write_state(path: Path, state: Mapping[str, Any]) -> None:
     _state_items(state)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_json(path, state)
 
 
 def _append_item(

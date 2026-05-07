@@ -41,6 +41,16 @@ Check:
 - `review/`
 - `.kb/errors.log`
 
+## `kb ingest` reports an active or stale lock
+
+`kb ingest` creates `.kb/ingest.lock` while it mutates KB files. If another ingest is genuinely running, wait for it to finish. If the prior process was interrupted, run:
+
+```bash
+kb ingest --resume --data-dir <path>
+```
+
+Use `kb doctor --data-dir <path>` to inspect the lock and `.kb/state.json` checkpoint. Use `kb ingest --force` only when you intend to discard stale recovery state and start over.
+
 ## Review items are piling up
 
 Use `kb review` to see bounded pending counts and stable item IDs:

@@ -18,6 +18,7 @@ from kb_librarian.indexing import (
     render_index_pages,
     reindex_data_dir,
 )
+from kb_librarian.ingest_recovery import lock_status, resumable_ingest_checkpoint
 from kb_librarian.ingest import ingest
 from kb_librarian.init import initialize_data_dir
 from kb_librarian.notes import read_note
@@ -104,6 +105,7 @@ def run_doctor(data_dir: str | Path, *, env: Mapping[str, str] | None = None) ->
         findings.append(DoctorFinding("Notes", "ok", "no-notes", "No notes found."))
 
     _check_review_state(root, note_ids, findings)
+    _check_recovery_state(root, findings)
     _check_markdown_indexes(root, records, config, findings)
     _check_backlinks(root, records, findings)
     _check_manifest(root, records, config, findings)
@@ -412,6 +414,56 @@ def _check_review_state(data_dir: Path, note_ids: set[str], findings: list[Docto
         findings.append(DoctorFinding("Review", "error", "review-state-unreadable", str(exc), path))
         return
     findings.append(DoctorFinding("Review", "ok", "review-state", "Review state is readable.", path))
+
+
+def _check_recovery_state(data_dir: Path, findings: list[DoctorFinding]) -> None:
+    status, payload = lock_status(data_dir)
+    if status == "active":
+        op = "unknown" if payload is None else str(payload.get("operation_id", "unknown"))
+        current = None if payload is None else payload.get("current_raw_file")
+        findings.append(
+            DoctorFinding(
+                "Recovery",
+                "warn",
+                "ingest-lock-active",
+                f"Ingest lock is active for operation {op}; current_raw_file={current or '(none yet)'}.",
+                data_dir / ".kb" / "ingest.lock",
+            )
+        )
+    elif status == "stale":
+        op = "unknown" if payload is None else str(payload.get("operation_id", "unknown"))
+        findings.append(
+            DoctorFinding(
+                "Recovery",
+                "warn",
+                "ingest-lock-stale",
+                f"Stale ingest lock found for operation {op}; run `kb ingest --resume` or `kb ingest --force`.",
+                data_dir / ".kb" / "ingest.lock",
+            )
+        )
+    else:
+        findings.append(DoctorFinding("Recovery", "ok", "ingest-lock", "No ingest lock is present."))
+
+    try:
+        checkpoint = resumable_ingest_checkpoint(data_dir)
+    except KBLibrarianError as exc:
+        findings.append(DoctorFinding("Recovery", "error", "ingest-state-unreadable", str(exc), data_dir / ".kb" / "state.json"))
+        return
+    if checkpoint is None:
+        findings.append(DoctorFinding("Recovery", "ok", "ingest-checkpoint", "No interrupted ingest checkpoint."))
+        return
+    op = str(checkpoint.get("operation_id", "unknown"))
+    stage = str(checkpoint.get("last_completed_stage", "unknown"))
+    current = checkpoint.get("current_raw_file") or "(none recorded)"
+    findings.append(
+        DoctorFinding(
+            "Recovery",
+            "warn",
+            "ingest-checkpoint-interrupted",
+            f"Interrupted ingest operation {op} at stage {stage}; current_raw_file={current}. Run `kb ingest --resume`.",
+            data_dir / ".kb" / "state.json",
+        )
+    )
 
 
 def _check_markdown_indexes(

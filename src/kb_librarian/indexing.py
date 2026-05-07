@@ -9,6 +9,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from kb_librarian.atomic import atomic_write_text
 from kb_librarian.search_index import build_lexical_index
 from kb_librarian.storage import (
     NOTE_ID_REFERENCE_PATTERN,
@@ -461,7 +462,7 @@ def _write_if_changed(path: Path, content: str) -> bool:
         existing = path.read_text(encoding="utf-8")
         if existing == content:
             return False
-    path.write_text(content, encoding="utf-8")
+    atomic_write_text(path, content)
     return True
 
 

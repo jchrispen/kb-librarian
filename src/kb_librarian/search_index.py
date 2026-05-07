@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import re
 import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Mapping
 
+from kb_librarian.atomic import atomic_replace_path
 from kb_librarian.errors import SearchIndexError
 
 TOKEN_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]*")
@@ -45,10 +48,17 @@ def tokenize_query(text: str) -> list[str]:
 
 def build_lexical_index(db_path: Path, documents: list[Mapping[str, str]]) -> str:
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    if db_path.exists():
-        db_path.unlink()
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{db_path.name}.",
+        suffix=".tmp",
+        dir=db_path.parent,
+    )
+    os.close(fd)
+    Path(temp_name).unlink()
+    # sqlite3 creates the database file itself; mkstemp only reserves a same-directory path.
+    temp_path = Path(temp_name)
 
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(temp_path)
     try:
         conn.execute(
             """
@@ -119,9 +129,16 @@ def build_lexical_index(db_path: Path, documents: list[Mapping[str, str]]) -> st
 
         conn.execute("INSERT INTO metadata(key, value) VALUES ('backend', ?)", (backend,))
         conn.commit()
+        conn.close()
+        atomic_replace_path(temp_path, db_path)
         return backend
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except sqlite3.Error:
+            pass
+        if temp_path.exists():
+            temp_path.unlink()
 
 
 def load_backend(db_path: Path) -> str:

@@ -43,7 +43,7 @@ kb doctor [--data-dir <path>] [--self-test]
 
 `kb doctor` groups findings by subsystem and prints `ok`, `warn`, or `error` severities. It returns nonzero when any `error` finding is present.
 
-Checks include required layout, config validity, note schema validity, duplicate IDs, broken note ID references, review state readability, markdown index freshness, backlinks, manifest freshness, lexical index freshness, raw ingest errors, and provider route presence.
+Checks include required layout, config validity, note schema validity, duplicate IDs, broken note ID references, review state readability, ingest lock/checkpoint recovery state, markdown index freshness, backlinks, manifest freshness, lexical index freshness, raw ingest errors, and provider route presence.
 
 `kb doctor --self-test` creates a temporary KB, configures the deterministic mock provider, ingests one tiny fixture, rebuilds indexes, searches it, and runs doctor against the fixture. It is offline and does not mutate your configured KB.
 
@@ -92,7 +92,7 @@ Use `--tree` to render nested slash-delimited topics as a hierarchy. When `revie
 Ingest one markdown or text file, or process pending files in `raw/`.
 
 ```bash
-kb ingest [<file>] [--data-dir <path>] [--force] [--quiet] [--json]
+kb ingest [<file>] [--data-dir <path>] [--force] [--resume] [--quiet] [--json]
 ```
 
 Current shipped supported input formats:
@@ -101,6 +101,8 @@ Current shipped supported input formats:
 - `.txt`
 
 Human-readable and JSON reports include outcome counts, created/appended note IDs, review item IDs for queued work, archived raw paths, warnings, and errors. `--quiet` suppresses the success report and only prints errors.
+
+`kb ingest` writes `.kb/ingest.lock` while it is mutating raw files, notes, review state, or indexes. A second ingest exits without processing. If an earlier ingest was interrupted, run `kb ingest --resume`; use `--force` only when you intend to discard a stale lock/checkpoint and start over.
 
 ## `kb review`
 

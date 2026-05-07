@@ -10,6 +10,7 @@ from typing import Any, Iterable, Mapping
 
 import yaml
 
+from kb_librarian.atomic import atomic_write_text
 from kb_librarian.errors import NoteParseError, NoteValidationError
 
 KNOWLEDGE_TYPES = {
@@ -190,7 +191,7 @@ def read_note(path: str | Path, *, validate: bool = True) -> Note:
 def write_note(path: str | Path, note: Note) -> None:
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(note.to_markdown(), encoding="utf-8")
+    atomic_write_text(destination, note.to_markdown())
 
 
 def order_frontmatter(frontmatter: Mapping[str, Any]) -> dict[str, Any]:
