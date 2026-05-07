@@ -25,10 +25,10 @@ Notes:
 
 ## `kb reindex`
 
-Rebuild markdown and lexical indexes from note files. Use `--scan-clusters` to also detect overlapping note clusters and refresh stale/orphan/low-utility hygiene queues.
+Rebuild markdown and lexical indexes from note files. Use `--scan-clusters` to also detect overlapping note clusters and refresh stale/orphan/low-utility hygiene queues. Use `--all` when you want the explicit full maintenance scan; in the current implementation it is equivalent to `--scan-clusters`.
 
 ```bash
-kb reindex [--data-dir <path>] [--scan-clusters]
+kb reindex [--data-dir <path>] [--scan-clusters] [--all]
 ```
 
 Large top-level and topic indexes are paginated deterministically according to `indexes.top_level_page_size` and `indexes.topic_page_size`. Pagination affects only the published markdown inspection surfaces; retrieval commands use generated local indexes and note metadata.

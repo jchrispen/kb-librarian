@@ -161,7 +161,7 @@ To detect overlapping notes and queue compaction plus hygiene work:
 kb reindex --scan-clusters --data-dir /path/to/kb
 ```
 
-This scan respects `review.duplicate_cluster_threshold`, `review.compaction_cooldown_days`, `review.stale_after_days`, and `review.orphan_after_days`. It creates or refreshes review items only; it does not rewrite notes.
+`kb reindex --all --data-dir /path/to/kb` runs the same full maintenance scan explicitly. This scan respects `review.duplicate_cluster_threshold`, `review.compaction_cooldown_days`, `review.stale_after_days`, and `review.orphan_after_days`. It creates or refreshes review items only; it does not rewrite notes.
 
 ## Check KB Health
 

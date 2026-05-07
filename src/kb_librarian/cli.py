@@ -185,6 +185,11 @@ def _add_reindex_parser(subcommands: argparse._SubParsersAction[argparse.Argumen
         action="store_true",
         help="Detect overlapping note clusters and queue compaction review items.",
     )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Run the full maintenance scan; currently equivalent to --scan-clusters.",
+    )
     parser.set_defaults(handler=_handle_reindex)
 
 
@@ -724,13 +729,21 @@ def _handle_reindex(args: argparse.Namespace) -> int:
     initialize_data_dir(data_dir)
     config = load_config(data_dir)
     auto_before = _capture_auto_commit_before(data_dir, config)
-    result = reindex_data_dir(data_dir, config=config, scan_clusters=bool(args.scan_clusters))
+    run_maintenance_scan = bool(args.scan_clusters or args.all)
+    result = reindex_data_dir(data_dir, config=config, scan_clusters=run_maintenance_scan)
     _print_reindex_result(result)
     auto_result = maybe_auto_commit(
         data_dir,
         config,
         operation="reindex",
-        identifiers=["scan-clusters"] if args.scan_clusters else [],
+        identifiers=[
+            identifier
+            for identifier, enabled in (
+                ("scan-clusters", args.scan_clusters),
+                ("all", args.all),
+            )
+            if enabled
+        ],
         before=auto_before,
     )
     _print_auto_commit_result(auto_result)
@@ -1464,7 +1477,7 @@ def _print_reindex_result(result: ReindexResult) -> None:
     print(
         f"Reindexed {result.note_count} notes across {result.topic_count} topics using {result.index_backend}."
     )
-    if result.compaction_clusters:
+    if result.maintenance_scan:
         print(
             "Compaction scan: "
             f"{result.compaction_clusters} cluster(s), "

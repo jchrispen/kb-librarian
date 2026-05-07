@@ -31,6 +31,7 @@ class ReindexResult:
     note_count: int
     topic_count: int
     index_backend: str
+    maintenance_scan: bool = False
     compaction_clusters: int = 0
     compaction_review_items: list[str] | None = None
     stale_review_items: list[str] | None = None
@@ -118,6 +119,7 @@ def reindex_data_dir(
         note_count=len(records),
         topic_count=len(grouped),
         index_backend=backend,
+        maintenance_scan=scan_clusters,
         compaction_clusters=compaction_clusters,
         compaction_review_items=compaction_review_items,
         stale_review_items=stale_review_items,

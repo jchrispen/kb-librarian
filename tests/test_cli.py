@@ -312,6 +312,11 @@ def test_kb_reindex_scan_clusters_and_compact_smoke(tmp_path):
     assert "Compaction scan: 1 cluster(s), 1 new review item(s)." in scan_result.stdout
     assert "Hygiene scan:" in scan_result.stdout
 
+    all_result = run_cli("reindex", "--all", "--data-dir", str(tmp_path))
+    assert all_result.returncode == 0
+    assert "Compaction scan: 1 cluster(s), 0 new review item(s)." in all_result.stdout
+    assert "Hygiene scan:" in all_result.stdout
+
     rendered = (tmp_path / "review" / "pending-compaction.md").read_text(encoding="utf-8")
     match = re.search(r"cluster_id: (cluster-[a-f0-9]+)", rendered)
     assert match is not None
