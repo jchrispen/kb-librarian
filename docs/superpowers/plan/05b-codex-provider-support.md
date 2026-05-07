@@ -2,7 +2,8 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
-Status: Pending
+Status: Complete
+Completed: 2026-05-07
 
 ## Goal
 
@@ -74,6 +75,21 @@ Add a Codex-compatible cloud provider adapter so users can route provider-backed
 - Credentials/config failures are explicit and actionable.
 - Retry/error behavior is consistent with existing provider resilience semantics.
 - Existing local/default provider behavior does not regress.
+
+## Completion Record
+
+Implemented files:
+
+- `src/kb_librarian/providers.py`: added the Codex-compatible Responses API provider adapter, provider construction, response text/JSON normalization, and HTTP/error mapping for retry classification.
+- `src/kb_librarian/config.py`: added default `providers.codex` config and validation for credential env, base URL, and timeout settings.
+- `src/kb_librarian/doctor.py`: added routed Codex provider support and credential diagnostics.
+- `tests/test_config.py`, `tests/test_providers.py`, `tests/test_ingest.py`, `tests/test_context.py`, `tests/test_compaction.py`, `tests/test_doctor.py`, `tests/test_cli.py`: added Codex config, adapter, error, route, doctor, and CLI failure-surface coverage.
+- `README.md`, `docs/configuration.md`, `docs/commands.md`, `docs/troubleshooting.md`, `docs/user-guide.md`: documented Codex provider setup, operation routes, credentials, and diagnostics.
+
+Verification:
+
+- `pytest -q tests/test_config.py tests/test_providers.py tests/test_ingest.py tests/test_context.py tests/test_compaction.py tests/test_doctor.py tests/test_cli.py` -> 102 passed, 2 skipped.
+- `pytest -q` -> 173 passed, 3 skipped.
 
 ## Out of Scope
 
