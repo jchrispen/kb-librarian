@@ -1,5 +1,8 @@
 # Phase 03d - Hierarchical Topics and Tree Views
 
+Status: Complete
+Completed: 2026-05-06
+
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
 ## Goal
@@ -73,6 +76,34 @@ Support nested topic organization without breaking existing retrieval behavior. 
 - Retrieval commands continue to work for both flat and nested topics.
 - `kb topics --tree` displays hierarchy and counts clearly.
 - Existing flat-topic KBs keep working without migration.
+
+## Completion Record
+
+Completed on 2026-05-06.
+
+Implemented files:
+
+- `src/kb_librarian/storage.py`
+- `src/kb_librarian/indexing.py`
+- `src/kb_librarian/cli.py`
+- `tests/test_storage.py`
+- `tests/test_indexing.py`
+- `tests/test_cli.py`
+- `README.md`
+- `docs/commands.md`
+- `docs/user-guide.md`
+
+Verification:
+
+- `pytest -q tests/test_storage.py tests/test_indexing.py tests/test_cli.py` - passed, 30 tests.
+- `pytest -q` - passed, 101 tests.
+
+Behavior delivered:
+
+- Slash-delimited topics now normalize to nested `topics/<parent>/<child>/...` directories while preserving flat-topic compatibility.
+- `kb reindex` now discovers nested topic directories recursively and ensures `scope.txt` plus generated topic indexes exist for parent and child topic directories.
+- Added `kb topics` and `kb topics --tree` for flat and hierarchical topic inspection, including note counts and stale/orphan/review counts when review state is present.
+- Retrieval and indexing paths continue to work with mixed flat and nested topics without changing note IDs.
 
 ## Out of Scope
 

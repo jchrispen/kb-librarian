@@ -15,8 +15,8 @@ Phase 3 assumes Phase 1 and Phase 2 are complete.
 | [03a - Compaction Detection and Proposal Flow](03a-compaction-detection-and-proposal-flow.md) | Complete | Added duplicate-cluster detection, `kb compact`, and durable review proposals without rewriting notes automatically. |
 | [03b - Hygiene Signal Queues](03b-hygiene-signal-queues.md) | Complete | Added stale/orphan/low-utility hygiene queues, explainable evidence payloads, and `kb flag-suspect`. |
 | [03c - Doctor and Scaled Index Surfaces](03c-doctor-and-scaled-index-surfaces.md) | Complete | Added `kb doctor`, offline self-test, and deterministic pagination for large indexes. |
-| [03d - Hierarchical Topics and Tree Views](03d-hierarchical-topics-and-tree-views.md) | Next | Adds nested topics, generated nested topic artifacts, and `kb topics --tree`. |
-| [03e - Review-Gated Hygiene Mutations](03e-review-gated-hygiene-mutations.md) | Pending | Applies accepted compaction and topic-reorganization changes safely under review control. |
+| [03d - Hierarchical Topics and Tree Views](03d-hierarchical-topics-and-tree-views.md) | Complete | Added nested topics, generated nested topic artifacts, and `kb topics --tree` with hierarchy-aware counts. |
+| [03e - Review-Gated Hygiene Mutations](03e-review-gated-hygiene-mutations.md) | Next | Applies accepted compaction and topic-reorganization changes safely under review control. |
 
 ## Milestone Order
 
@@ -26,9 +26,9 @@ Phase 3 assumes Phase 1 and Phase 2 are complete.
    - Surfaces stale, orphaned, and low-utility knowledge with explainable evidence and bounded review items.
 3. [03c - Doctor and Scaled Index Surfaces](03c-doctor-and-scaled-index-surfaces.md) - complete
    - Adds health checks and keeps large published indexes inspectable without affecting retrieval behavior.
-4. [03d - Hierarchical Topics and Tree Views](03d-hierarchical-topics-and-tree-views.md) - next
+4. [03d - Hierarchical Topics and Tree Views](03d-hierarchical-topics-and-tree-views.md) - complete
    - Introduces nested topic structure and hierarchy-aware inspection while preserving retrieval compatibility.
-5. [03e - Review-Gated Hygiene Mutations](03e-review-gated-hygiene-mutations.md) - pending
+5. [03e - Review-Gated Hygiene Mutations](03e-review-gated-hygiene-mutations.md) - next
    - Safely applies accepted compaction and topic reorganization under clean-worktree and history-preserving rules.
 
 Each milestone should leave the CLI runnable and covered by focused tests. Later milestones may adjust earlier code, but they should preserve accepted Phase 1-2 behavior and the public interfaces already shipped in earlier Phase 3 milestones.
