@@ -29,6 +29,19 @@ ollama pull llama3.2
 
 For deterministic offline development or tests, reconfigure the provider manually to use the codebase's `mock` provider.
 
+## Codex provider routes fail
+
+Codex-compatible routes use `providers.codex.api_key_env` and `providers.codex.base_url`.
+
+Check these in order:
+
+1. Confirm the configured environment variable is set, usually `OPENAI_API_KEY`
+2. Confirm every Codex-routed operation uses an available model ID
+3. Run `kb doctor --data-dir <path>` and inspect the Providers section
+4. Increase `providers.codex.timeout_seconds` if requests time out
+5. Check `providers.codex.base_url` if you use a non-default Responses API compatible endpoint
+6. Switch operation routes to Anthropic or local if Codex access is unavailable
+
 ## Local provider routes fail
 
 The local provider currently supports Ollama through `providers.local.base_url`.

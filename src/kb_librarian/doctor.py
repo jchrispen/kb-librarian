@@ -31,7 +31,7 @@ from kb_librarian.search_index import load_backend, query_candidates
 from kb_librarian.storage import NOTE_ID_REFERENCE_PATTERN, NoteRecord, iter_note_files
 
 SEVERITIES = ("ok", "warn", "error")
-SUPPORTED_PROVIDERS = {"anthropic", "local", "mock"}
+SUPPORTED_PROVIDERS = {"anthropic", "codex", "local", "mock"}
 
 
 @dataclass(frozen=True)
@@ -757,6 +757,35 @@ def _check_provider_routes(
                         "warn",
                         "provider-api-key-unset",
                         f"Environment variable {api_key_env} is not set for provider-backed commands.",
+                    )
+                )
+        elif provider_name == "codex":
+            api_key_env = provider_config.get("api_key_env")
+            if not isinstance(api_key_env, str) or not api_key_env.strip():
+                findings.append(
+                    DoctorFinding(
+                        "Providers",
+                        "error",
+                        "codex-provider-api-env-missing",
+                        "Codex provider is missing api_key_env.",
+                    )
+                )
+            elif not env.get(api_key_env):
+                findings.append(
+                    DoctorFinding(
+                        "Providers",
+                        "warn",
+                        "codex-provider-api-key-unset",
+                        f"Environment variable {api_key_env} is not set for Codex-routed commands.",
+                    )
+                )
+            else:
+                findings.append(
+                    DoctorFinding(
+                        "Providers",
+                        "ok",
+                        "codex-provider-credentials",
+                        f"Codex provider credential environment variable {api_key_env} is set.",
                     )
                 )
         elif provider_name == "local":

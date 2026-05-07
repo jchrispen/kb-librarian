@@ -177,6 +177,34 @@ def provider_from_config(
                 "or configure ingest to use the mock provider."
             )
         return AnthropicProvider(api_key=api_key)
+    if provider_name == "codex":
+        api_key_env = provider_config.get("api_key_env")
+        if not isinstance(api_key_env, str) or not api_key_env.strip():
+            raise ProviderError("Config key providers.codex.api_key_env is required.")
+        base_url = provider_config.get("base_url")
+        if not isinstance(base_url, str) or not base_url.strip():
+            raise ProviderError("Config key providers.codex.base_url is required.")
+        environ = os.environ if env is None else env
+        api_key = environ.get(api_key_env)
+        if not api_key:
+            raise ProviderError(
+                f"Missing Codex provider API key. Set environment variable {api_key_env} "
+                "or switch the operation route to another configured provider."
+            )
+        timeout = _provider_timeout_seconds(provider_config.get("timeout_seconds"), default=120.0)
+        organization = provider_config.get("organization")
+        if organization is not None and not isinstance(organization, str):
+            raise ProviderError("Config key providers.codex.organization must be a string when present.")
+        project = provider_config.get("project")
+        if project is not None and not isinstance(project, str):
+            raise ProviderError("Config key providers.codex.project must be a string when present.")
+        return CodexProvider(
+            api_key=api_key,
+            base_url=base_url,
+            timeout_seconds=timeout,
+            organization=organization.strip() if isinstance(organization, str) else None,
+            project=project.strip() if isinstance(project, str) else None,
+        )
     if provider_name == "local":
         backend = str(provider_config.get("backend", "ollama")).strip() or "ollama"
         if backend != "ollama":
@@ -937,6 +965,89 @@ class AnthropicProvider:
             raise ProviderError("Anthropic response was not valid Messages API JSON.") from exc
 
 
+class CodexProvider(AnthropicProvider):
+    """Codex-compatible Responses API adapter using structured JSON prompts."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str = "https://api.openai.com/v1",
+        timeout_seconds: float = 120.0,
+        organization: str | None = None,
+        project: str | None = None,
+    ) -> None:
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
+        self.timeout_seconds = timeout_seconds
+        self.organization = organization
+        self.project = project
+
+    def _messages_json(self, *, model: str, prompt: str) -> Any:
+        envelope = self._responses_envelope(model=model, prompt=prompt, json_format=True)
+        return parse_json_response(_codex_envelope_text(envelope))
+
+    def _messages_text(self, *, model: str, prompt: str) -> str:
+        envelope = self._responses_envelope(model=model, prompt=prompt, json_format=False)
+        return _codex_envelope_text(envelope)
+
+    def _responses_envelope(self, *, model: str, prompt: str, json_format: bool) -> Any:
+        if not model:
+            raise ProviderError("Codex provider operation requires a model.")
+        body: dict[str, Any] = {
+            "model": model,
+            "input": [
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": prompt}],
+                }
+            ],
+            "max_output_tokens": 4096,
+        }
+        if json_format:
+            body["text"] = {"format": {"type": "json_object"}}
+        headers = {
+            "content-type": "application/json",
+            "authorization": f"Bearer {self.api_key}",
+        }
+        if self.organization:
+            headers["OpenAI-Organization"] = self.organization
+        if self.project:
+            headers["OpenAI-Project"] = self.project
+        request = urllib.request.Request(
+            _join_url(self.base_url, "/responses"),
+            data=json.dumps(body).encode("utf-8"),
+            method="POST",
+            headers=headers,
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                raw = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            raise _codex_http_error(exc) from exc
+        except urllib.error.URLError as exc:
+            raise ProviderError(
+                "Codex provider request failed: "
+                f"{exc}. Check providers.codex.base_url, network access, or switch the operation route."
+            ) from exc
+        except TimeoutError as exc:
+            raise ProviderError(
+                f"Codex provider request timed out after {self.timeout_seconds:g}s. "
+                "Increase providers.codex.timeout_seconds or switch the operation route."
+            ) from exc
+
+        try:
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, AttributeError) as exc:
+            raise ProviderError("Codex provider response was not valid Responses API JSON.") from exc
+        if not isinstance(payload, Mapping):
+            raise ProviderError("Codex provider response was not a JSON object.")
+        response_error = payload.get("error")
+        if response_error:
+            raise ProviderError(f"Codex provider response returned an error: {_provider_error_text(response_error)}")
+        return payload
+
+
 def _envelope_text(envelope: Any) -> str:
     if not isinstance(envelope, Mapping):
         raise ProviderError("Anthropic response was not a JSON object.")
@@ -948,6 +1059,91 @@ def _envelope_text(envelope: Any) -> str:
     if not text_parts:
         raise ProviderError("Anthropic response did not contain text content.")
     return "\n".join(str(part) for part in text_parts if str(part).strip())
+
+
+def _codex_envelope_text(envelope: Any) -> str:
+    if not isinstance(envelope, Mapping):
+        raise ProviderError("Codex provider response was not a JSON object.")
+
+    direct_output_text = envelope.get("output_text")
+    if isinstance(direct_output_text, str) and direct_output_text.strip():
+        return direct_output_text.strip()
+
+    text_parts: list[str] = []
+    refusals: list[str] = []
+    output = envelope.get("output")
+    if isinstance(output, list):
+        for item in output:
+            if not isinstance(item, Mapping):
+                continue
+            content = item.get("content")
+            if not isinstance(content, list):
+                continue
+            for content_item in content:
+                if not isinstance(content_item, Mapping):
+                    continue
+                item_type = content_item.get("type")
+                if item_type == "output_text" and isinstance(content_item.get("text"), str):
+                    text = content_item["text"].strip()
+                    if text:
+                        text_parts.append(text)
+                elif item_type == "refusal" and isinstance(content_item.get("refusal"), str):
+                    refusal = content_item["refusal"].strip()
+                    if refusal:
+                        refusals.append(refusal)
+
+    if text_parts:
+        return "\n".join(text_parts)
+    if refusals:
+        raise ProviderError("Codex provider refused request: " + " ".join(refusals))
+
+    incomplete_details = envelope.get("incomplete_details")
+    if isinstance(incomplete_details, Mapping):
+        reason = incomplete_details.get("reason")
+        if isinstance(reason, str) and reason.strip():
+            raise ProviderError(f"Codex provider response was incomplete: {reason.strip()}.")
+    raise ProviderError("Codex provider response did not contain text content.")
+
+
+def _codex_http_error(exc: urllib.error.HTTPError) -> ProviderError:
+    try:
+        response_body = exc.read().decode("utf-8")
+    except Exception:
+        response_body = ""
+    body_excerpt = _provider_error_text(response_body).strip().replace("\n", " ")[:240]
+    message = f"Codex provider request failed with HTTP {exc.code}"
+    if body_excerpt:
+        message += f": {body_excerpt}"
+    if exc.code in {401, 403}:
+        message += ". Check providers.codex.api_key_env and the configured API key."
+    elif exc.code == 404:
+        message += ". Check providers.codex.base_url and the configured model."
+    elif exc.code == 429:
+        message += ". The provider rate limited the request; retry policy may retry this operation."
+    elif 500 <= int(exc.code) <= 599:
+        message += ". The provider returned a server error; retry policy may retry this operation."
+    return ProviderError(message)
+
+
+def _provider_error_text(error_payload: Any) -> str:
+    if isinstance(error_payload, str):
+        try:
+            decoded = json.loads(error_payload)
+        except json.JSONDecodeError:
+            return error_payload
+        return _provider_error_text(decoded)
+    if isinstance(error_payload, Mapping):
+        nested_error = error_payload.get("error")
+        if isinstance(nested_error, Mapping):
+            return _provider_error_text(nested_error)
+        message = error_payload.get("message")
+        code = error_payload.get("code")
+        if isinstance(message, str) and message.strip():
+            if isinstance(code, str) and code.strip():
+                return f"{code.strip()}: {message.strip()}"
+            return message.strip()
+        return json.dumps(dict(error_payload), sort_keys=True)
+    return str(error_payload)
 
 
 def parse_json_response(text: str) -> Any:

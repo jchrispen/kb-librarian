@@ -184,3 +184,32 @@ def test_doctor_reports_local_provider_reachable_when_routed(tmp_path, monkeypat
 
     assert report.error_count == 0
     assert "local-provider-reachable" in rendered
+
+
+def test_doctor_reports_codex_api_key_warning_when_routed(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    for operation in config["operations"]:
+        config["operations"][operation] = {"provider": "codex", "model": "gpt-5.1-codex"}
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 0
+    assert "codex-provider-api-key-unset" in rendered
+    assert "OPENAI_API_KEY" in rendered
+
+
+def test_doctor_reports_codex_credentials_when_routed(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    for operation in config["operations"]:
+        config["operations"][operation] = {"provider": "codex", "model": "gpt-5.1-codex"}
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    report = run_doctor(tmp_path, env={"OPENAI_API_KEY": "test-key"})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 0
+    assert "codex-provider-credentials" in rendered

@@ -43,6 +43,10 @@ data_dir: ~/.kb/.library
 providers:
   anthropic:
     api_key_env: ANTHROPIC_API_KEY
+  codex:
+    api_key_env: OPENAI_API_KEY
+    base_url: https://api.openai.com/v1
+    timeout_seconds: 120
   local:
     backend: ollama
     base_url: http://127.0.0.1:11434
@@ -120,6 +124,35 @@ export ANTHROPIC_API_KEY=your_key_here
 ```
 
 If the key is missing, provider-backed commands fail with an explicit error.
+
+The generated config also includes an opt-in Codex-compatible provider section for cloud-backed routes through an OpenAI Responses API compatible endpoint:
+
+```yaml
+providers:
+  codex:
+    api_key_env: OPENAI_API_KEY
+    base_url: https://api.openai.com/v1
+    timeout_seconds: 120
+```
+
+To route provider-backed operations to Codex, set operation routes to `provider: codex` and choose the model IDs you want to use:
+
+```yaml
+operations:
+  extract:    { provider: codex, model: gpt-5.1-codex }
+  compact:    { provider: codex, model: gpt-5.1-codex }
+  classify:   { provider: codex, model: gpt-5.1-codex }
+  integrate:  { provider: codex, model: gpt-5.1-codex }
+  synthesize: { provider: codex, model: gpt-5.1-codex }
+```
+
+Set the configured API key environment variable before running Codex-routed commands:
+
+```bash
+export OPENAI_API_KEY=your_key_here
+```
+
+`providers.codex.base_url` may point at another Responses API compatible endpoint. `kb doctor` warns when Codex routes are configured but the credential environment variable is unset.
 
 The generated config also includes an opt-in local provider section for Ollama:
 

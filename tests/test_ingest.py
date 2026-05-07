@@ -38,6 +38,15 @@ def local_ingest_config(data_dir: Path) -> dict[str, object]:
     return config
 
 
+def codex_ingest_config(data_dir: Path) -> dict[str, object]:
+    config = default_config(data_dir)
+    config["operations"]["extract"] = {"provider": "codex", "model": "gpt-5.1-codex"}
+    config["operations"]["classify"] = {"provider": "codex", "model": "gpt-5.1-codex"}
+    config["operations"]["integrate"] = {"provider": "codex", "model": "gpt-5.1-codex"}
+    write_config_file(data_dir / ".kb" / "config.yaml", config)
+    return config
+
+
 def _seed_note(data_dir: Path, *, topic: str, note_id: str, title: str, body: str) -> Path:
     ensure_topic_layout(data_dir, topic)
     note = Note(
@@ -473,6 +482,30 @@ def test_ingest_routes_extract_classify_integrate_to_local_provider(tmp_path, mo
     assert report.errors == 0
     assert len(report.created_notes) == 1
     assert provider_names == ["local", "local", "local"]
+
+
+def test_ingest_routes_extract_classify_integrate_to_codex_provider(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    config = codex_ingest_config(tmp_path)
+    source = tmp_path / "raw" / "codex-ingest.md"
+    source.write_text(
+        "# Codex ingest route\n\nPrefer Codex provider routes for cloud-backed coding notes.\n",
+        encoding="utf-8",
+    )
+    provider_names = []
+    provider = MockProvider()
+
+    def _provider_from_config(config, provider_name, **kwargs):  # noqa: ANN001
+        provider_names.append(provider_name)
+        return provider
+
+    monkeypatch.setattr("kb_librarian.ingest.provider_from_config", _provider_from_config)
+
+    report = ingest(tmp_path, config=config)
+
+    assert report.errors == 0
+    assert len(report.created_notes) == 1
+    assert provider_names == ["codex", "codex", "codex"]
 
 
 def test_ingest_final_provider_failure_is_resumable(tmp_path, monkeypatch):

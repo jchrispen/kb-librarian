@@ -80,6 +80,11 @@ def default_config(data_dir: str | Path | None = None, *, hooks: bool = False) -
             "anthropic": {
                 "api_key_env": "ANTHROPIC_API_KEY",
             },
+            "codex": {
+                "api_key_env": "OPENAI_API_KEY",
+                "base_url": "https://api.openai.com/v1",
+                "timeout_seconds": 120,
+            },
             "local": {
                 "backend": "ollama",
                 "base_url": "http://127.0.0.1:11434",
@@ -274,6 +279,21 @@ def validate_config(config: Mapping[str, Any]) -> None:
         raise ConfigError("Config section providers.anthropic must be a mapping.")
     if not anthropic.get("api_key_env"):
         raise ConfigError("Config key providers.anthropic.api_key_env is required.")
+
+    codex = config["providers"].get("codex")
+    if codex is not None:
+        if not isinstance(codex, Mapping):
+            raise ConfigError("Config section providers.codex must be a mapping when present.")
+        api_key_env = codex.get("api_key_env")
+        if not isinstance(api_key_env, str) or not api_key_env.strip():
+            raise ConfigError("Config key providers.codex.api_key_env must be a non-empty string.")
+        base_url = codex.get("base_url")
+        if not isinstance(base_url, str) or not base_url.strip():
+            raise ConfigError("Config key providers.codex.base_url must be a non-empty URL.")
+        parsed_base_url = urlparse(base_url.strip())
+        if parsed_base_url.scheme not in {"http", "https"} or not parsed_base_url.netloc:
+            raise ConfigError("Config key providers.codex.base_url must be an http(s) URL.")
+        _validate_positive_number(codex, "providers.codex.timeout_seconds")
 
     local = config["providers"].get("local")
     if local is not None:

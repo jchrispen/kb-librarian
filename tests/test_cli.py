@@ -633,6 +633,45 @@ def test_kb_context_mock_provider_smoke(tmp_path):
     assert "\"title\":" in json_result.stdout
 
 
+def test_kb_context_codex_missing_key_failure_surface(tmp_path):
+    init_result = run_cli("init", "--data-dir", str(tmp_path))
+    assert init_result.returncode == 0
+
+    config = default_config(tmp_path)
+    config["operations"]["synthesize"] = {"provider": "codex", "model": "gpt-5.1-codex"}
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    seed = tmp_path / "seed.md"
+    seed.write_text(
+        "# Codex route diagnostic\n\nPrefer explicit provider route errors.\n",
+        encoding="utf-8",
+    )
+    add_result = run_cli(
+        "add",
+        "--data-dir",
+        str(tmp_path),
+        "--topic",
+        "agent-systems",
+        "--type",
+        "heuristic",
+        "--from-file",
+        str(seed),
+    )
+    assert add_result.returncode == 0
+
+    result = run_cli(
+        "context",
+        "codex route diagnostic",
+        "--data-dir",
+        str(tmp_path),
+        env={"OPENAI_API_KEY": ""},
+    )
+
+    assert result.returncode == 1
+    assert "Missing Codex provider API key" in result.stderr
+    assert "OPENAI_API_KEY" in result.stderr
+
+
 def test_kb_explore_mock_provider_smoke(tmp_path):
     init_result = run_cli("init", "--data-dir", str(tmp_path))
     assert init_result.returncode == 0

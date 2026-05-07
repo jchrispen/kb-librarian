@@ -13,6 +13,7 @@ You need:
 - Python 3.11+
 - A writable KB data directory
 - `ANTHROPIC_API_KEY` if you want to use the default provider-backed ingest and context flow
+- `OPENAI_API_KEY` if you route provider-backed operations to the Codex-compatible provider
 
 Install the package:
 

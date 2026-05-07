@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import io
 from pathlib import Path
 import urllib.error
 
 import pytest
 
+from kb_librarian.provider_retry import classify_provider_failure
 from kb_librarian.errors import ProviderError
 from kb_librarian.providers import (
+    CodexProvider,
     LocalOllamaProvider,
     MockProvider,
     local_provider_status,
@@ -200,6 +203,119 @@ def test_provider_from_config_builds_local_ollama_provider():
     )
 
     assert isinstance(provider, LocalOllamaProvider)
+
+
+def test_provider_from_config_builds_codex_provider():
+    provider = provider_from_config(
+        {
+            "providers": {
+                "codex": {
+                    "api_key_env": "OPENAI_API_KEY",
+                    "base_url": "https://api.openai.com/v1",
+                    "timeout_seconds": 3,
+                }
+            }
+        },
+        "codex",
+        env={"OPENAI_API_KEY": "test-key"},
+    )
+
+    assert isinstance(provider, CodexProvider)
+
+
+def test_provider_from_config_requires_codex_api_key():
+    with pytest.raises(ProviderError, match="Missing Codex provider API key"):
+        provider_from_config(
+            {
+                "providers": {
+                    "codex": {
+                        "api_key_env": "OPENAI_API_KEY",
+                        "base_url": "https://api.openai.com/v1",
+                    }
+                }
+            },
+            "codex",
+            env={},
+        )
+
+
+def test_codex_provider_maps_responses_structured_response(monkeypatch):
+    requests = []
+
+    def fake_urlopen(request, timeout):  # noqa: ANN001
+        requests.append((request, json.loads(request.data.decode("utf-8")), timeout))
+        return _FakeResponse(
+            {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": json.dumps(
+                                    {
+                                        "candidates": [
+                                            {
+                                                "title": "Codex provider note",
+                                                "summary": "Codex provider extracts structured notes.",
+                                                "knowledge_type": "technique",
+                                                "body": "## Core idea\n\nUse Codex provider routes.\n",
+                                                "retrieval_phrases": ["codex provider"],
+                                                "tags": ["codex"],
+                                                "confidence": "high",
+                                                "utility_score": "high",
+                                            }
+                                        ]
+                                    }
+                                ),
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("kb_librarian.providers.urllib.request.urlopen", fake_urlopen)
+
+    provider = CodexProvider(api_key="test-key", base_url="https://example.test/v1/", timeout_seconds=11)
+    result = provider.extract_candidates(
+        text="# Codex provider\n\nUse Codex-compatible provider routes.",
+        source_path=Path("raw/codex.md"),
+        max_notes=3,
+        model="gpt-5.1-codex",
+    )
+
+    request, body, timeout = requests[0]
+    assert result.candidates[0].title == "Codex provider note"
+    assert request.full_url == "https://example.test/v1/responses"
+    assert request.get_header("Authorization") == "Bearer test-key"
+    assert body["model"] == "gpt-5.1-codex"
+    assert body["text"]["format"]["type"] == "json_object"
+    assert body["input"][0]["content"][0]["type"] == "input_text"
+    assert timeout == 11
+
+
+def test_codex_provider_http_errors_feed_retry_classification(monkeypatch):
+    def fake_urlopen(request, timeout):  # noqa: ANN001
+        raise urllib.error.HTTPError(
+            request.full_url,
+            429,
+            "Too Many Requests",
+            {},
+            io.BytesIO(b'{"error":{"code":"rate_limit_exceeded","message":"slow down"}}'),
+        )
+
+    monkeypatch.setattr("kb_librarian.providers.urllib.request.urlopen", fake_urlopen)
+    provider = CodexProvider(api_key="test-key", base_url="https://example.test/v1")
+
+    with pytest.raises(ProviderError) as exc_info:
+        provider.synthesize_context(task="x", selected_notes=[], model="gpt-5.1-codex")
+
+    assert "Codex provider request failed with HTTP 429" in str(exc_info.value)
+    assert "rate limited" in str(exc_info.value)
+    classification = classify_provider_failure(exc_info.value)
+    assert classification.transient is True
+    assert classification.detail == "http_status=429"
 
 
 def test_local_ollama_provider_maps_structured_response(monkeypatch):

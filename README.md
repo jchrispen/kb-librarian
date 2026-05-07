@@ -6,7 +6,7 @@ It stores durable knowledge as markdown files in a separate data directory, buil
 
 ## Status
 
-This repository currently ships the Phase 1 core workflow, Phase 2 daily-use ergonomics, Phase 3 hygiene/topic surfaces, Phase 4 robustness/polish features, and the Phase 5a local-provider core:
+This repository currently ships the Phase 1 core workflow, Phase 2 daily-use ergonomics, Phase 3 hygiene/topic surfaces, Phase 4 robustness/polish features, the Phase 5a local-provider core, and Phase 5b Codex provider support:
 
 - `kb init`
 - `kb add`
@@ -40,7 +40,7 @@ Phase 5+ provider and retrieval extensions remain deferred backlog in the design
 - Reports KB health with read-only doctor diagnostics and an offline self-test
 - Supports slash-delimited hierarchical topics with nested topic indexes and `kb topics --tree`
 - Supports clean-worktree-protected topic rename/promote operations and review-gated topic split/merge proposals
-- Routes provider-backed operations through Anthropic by default or an opt-in local Ollama provider
+- Routes provider-backed operations through Anthropic by default, an opt-in Codex-compatible cloud provider, or an opt-in local Ollama provider
 - Retries transient provider failures with bounded backoff and logs retry/final-stop diagnostics
 - Includes deterministic golden corpus regression tests plus opt-in live-provider smoke coverage
 - Generates optional hook/scheduler templates without installing them automatically
@@ -52,6 +52,7 @@ Requirements:
 
 - Python 3.11+
 - Optional: `ANTHROPIC_API_KEY` for the default provider-backed ingest and context flow
+- Optional: `OPENAI_API_KEY` for Codex-routed provider-backed operations
 
 Install in editable mode:
 
@@ -157,6 +158,8 @@ Important review files:
 ## Provider Notes
 
 The default operation routes use Anthropic. That means `kb ingest`, `kb context`, `kb explore`, and `kb compact` need `ANTHROPIC_API_KEY` unless you reconfigure providers in `.kb/config.yaml`.
+
+The generated config includes an opt-in `providers.codex` section for OpenAI Responses API compatible cloud routes. To use it, set operation routes to `provider: codex`, choose Codex model IDs, set `OPENAI_API_KEY` or the configured credential environment variable, and run `kb doctor` to verify the route configuration.
 
 The generated config also includes an opt-in `providers.local` section for Ollama. To run provider-backed operations locally, set the operation routes to `provider: local`, choose an installed Ollama model, start Ollama, and run `kb doctor` to verify reachability.
 

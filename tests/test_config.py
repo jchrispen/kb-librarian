@@ -24,6 +24,8 @@ def test_default_config_contains_phase_1_sections(tmp_path):
 
     assert "providers:" in rendered
     assert "retry:" in rendered
+    assert "codex:" in rendered
+    assert "api_key_env: OPENAI_API_KEY" in rendered
     assert "local:" in rendered
     assert "backend: ollama" in rendered
     assert "base_url: http://127.0.0.1:11434" in rendered
@@ -146,6 +148,31 @@ def test_validate_config_accepts_local_provider_routes(tmp_path):
         config["operations"][operation] = {"provider": "local", "model": "llama3.2"}
 
     validate_config(config)
+
+
+def test_validate_config_accepts_codex_provider_routes(tmp_path):
+    config = default_config(tmp_path)
+    for operation in config["operations"]:
+        config["operations"][operation] = {"provider": "codex", "model": "gpt-5.1-codex"}
+
+    validate_config(config)
+
+
+def test_validate_config_rejects_malformed_codex_provider(tmp_path):
+    config = default_config(tmp_path)
+    config["providers"]["codex"]["api_key_env"] = ""
+    with pytest.raises(ConfigError, match="providers.codex.api_key_env"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["codex"]["base_url"] = "api.openai.com/v1"
+    with pytest.raises(ConfigError, match="providers.codex.base_url"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["codex"]["timeout_seconds"] = 0
+    with pytest.raises(ConfigError, match="providers.codex.timeout_seconds"):
+        validate_config(config)
 
 
 def test_validate_config_rejects_malformed_local_provider(tmp_path):
