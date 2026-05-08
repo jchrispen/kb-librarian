@@ -56,7 +56,26 @@ Requirements:
 - Optional: `ANTHROPIC_API_KEY` for the default provider-backed ingest and context flow
 - Optional: `OPENAI_API_KEY` for Codex-routed provider-backed operations
 
-Install in editable mode:
+Create and activate a virtual environment:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+```
+
+Install from a local checkout:
+
+```bash
+python3 -m pip install .
+```
+
+Install from a downloaded release wheel:
+
+```bash
+python3 -m pip install kb_librarian-0.1.0-py3-none-any.whl
+```
+
+Editable install remains available for development:
 
 ```bash
 python3 -m pip install -e .
@@ -177,6 +196,7 @@ For offline development or tests, the codebase also supports a deterministic `mo
 - [Codex KB Demo Guide](docs/codex-kb-demo.md)
 - [Configuration Reference](docs/configuration.md)
 - [Command Reference](docs/commands.md)
+- [Release Guide](docs/releasing.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Canonical Design Spec](docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md)
 

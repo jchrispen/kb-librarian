@@ -15,10 +15,35 @@ You need:
 - `ANTHROPIC_API_KEY` if you want to use the default provider-backed ingest and context flow
 - `OPENAI_API_KEY` if you route provider-backed operations to the Codex-compatible provider
 
-Install the package:
+Create and activate a virtual environment first:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+```
+
+Install the package from a local checkout:
+
+```bash
+python3 -m pip install .
+```
+
+Or install from a downloaded release wheel:
+
+```bash
+python3 -m pip install kb_librarian-0.1.0-py3-none-any.whl
+```
+
+Use an editable install only when developing against the source tree:
 
 ```bash
 python3 -m pip install -e .
+```
+
+Verify the CLI after installation:
+
+```bash
+kb --help
 ```
 
 ## Initialize a KB

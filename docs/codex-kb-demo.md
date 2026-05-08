@@ -7,7 +7,9 @@ This guide sets up a small KB at `~/.kb/.library/`, adds source material through
 From the `kb-librarian` repo, install the CLI if needed:
 
 ```bash
-python3 -m pip install -e .
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install .
 kb --help
 ```
 
