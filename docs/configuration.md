@@ -42,8 +42,12 @@ data_dir: ~/.kb/.library
 
 providers:
   anthropic:
+    backend: direct_http
+    credential_source: api_key_env
     api_key_env: ANTHROPIC_API_KEY
   codex:
+    backend: direct_http
+    credential_source: api_key_env
     api_key_env: OPENAI_API_KEY
     base_url: https://api.openai.com/v1
     timeout_seconds: 120
@@ -123,7 +127,7 @@ hooks:
 
 ## Provider Configuration
 
-The generated config routes operations through Anthropic by default. The environment variable named by `providers.anthropic.api_key_env` must be set for those operations to work.
+The generated config routes operations through Anthropic by default. The default cloud seam is `backend: direct_http` with `credential_source: api_key_env`, and the environment variable named by `providers.anthropic.api_key_env` must be set for those operations to work.
 
 Example:
 
@@ -138,6 +142,8 @@ The generated config also includes an opt-in Codex-compatible provider section f
 ```yaml
 providers:
   codex:
+    backend: direct_http
+    credential_source: api_key_env
     api_key_env: OPENAI_API_KEY
     base_url: https://api.openai.com/v1
     timeout_seconds: 120
@@ -160,7 +166,7 @@ Set the configured API key environment variable before running Codex-routed comm
 export OPENAI_API_KEY=your_key_here
 ```
 
-`providers.codex.base_url` may point at another Responses API compatible endpoint. `kb doctor` warns when Codex routes are configured but the credential environment variable is unset.
+`providers.codex.base_url` may point at another Responses API compatible endpoint. `kb doctor` reports the active backend and credential source, and warns when Codex routes are configured but the credential environment variable is unset.
 
 The generated config also includes an opt-in local provider section for Ollama:
 
@@ -190,6 +196,13 @@ ollama pull llama3.2
 ```
 
 `kb doctor` checks local-provider reachability and reports missing routed models when local routes are configured.
+
+Cloud providers also accept explicit future-facing seam fields:
+
+- `backend`: currently `direct_http` or recognized-but-not-yet-implemented `vendor_cli`
+- `credential_source`: `api_key_env`, recognized-but-not-yet-implemented `vendor_cli`, Anthropic-only `token_env`, or `command`
+
+Existing API-key configs remain valid when these fields are absent. If you opt into an unsupported seam, validation and `kb doctor` fail explicitly instead of silently falling back to API-key behavior.
 
 `providers.retry` controls bounded retry/backoff behavior for provider-backed operations:
 

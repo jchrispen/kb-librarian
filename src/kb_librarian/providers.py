@@ -19,6 +19,7 @@ from kb_librarian.provider_retry import (
     call_with_retry,
     classify_provider_failure,
 )
+from kb_librarian.provider_seams import BACKEND_OLLAMA, ProviderSeam, provider_seam_supported_for_runtime, resolve_provider_seam
 from kb_librarian.privacy import enforce_provider_privacy
 from kb_librarian.storage import normalize_topic_for_path
 
@@ -269,32 +270,36 @@ def provider_from_config(
         raise ProviderError(f"Config section providers.{provider_name} must be a mapping.")
 
     if provider_name == "mock":
+        seam = _provider_seam(provider_name, provider_config)
+        _ensure_runtime_support(seam)
         return MockProvider()
     if provider_name == "anthropic":
-        api_key_env = provider_config.get("api_key_env")
-        if not isinstance(api_key_env, str) or not api_key_env.strip():
-            raise ProviderError("Config key providers.anthropic.api_key_env is required.")
+        seam = _provider_seam(provider_name, provider_config)
+        _ensure_runtime_support(seam)
         environ = os.environ if env is None else env
+        api_key_env = seam.api_key_env or "ANTHROPIC_API_KEY"
         api_key = environ.get(api_key_env)
         if not api_key:
             raise ProviderError(
-                f"Missing Anthropic API key. Set environment variable {api_key_env} "
-                "or configure ingest to use the mock provider."
+                f"Missing Anthropic credentials for credential_source {seam.diagnostic_credential_source!r}. "
+                f"Set environment variable {api_key_env} "
+                "or switch providers.anthropic.credential_source back to 'api_key_env'."
             )
         return AnthropicProvider(api_key=api_key)
     if provider_name == "codex":
-        api_key_env = provider_config.get("api_key_env")
-        if not isinstance(api_key_env, str) or not api_key_env.strip():
-            raise ProviderError("Config key providers.codex.api_key_env is required.")
+        seam = _provider_seam(provider_name, provider_config)
+        _ensure_runtime_support(seam)
         base_url = provider_config.get("base_url")
         if not isinstance(base_url, str) or not base_url.strip():
             raise ProviderError("Config key providers.codex.base_url is required.")
         environ = os.environ if env is None else env
+        api_key_env = seam.api_key_env or "OPENAI_API_KEY"
         api_key = environ.get(api_key_env)
         if not api_key:
             raise ProviderError(
-                f"Missing Codex provider API key. Set environment variable {api_key_env} "
-                "or switch the operation route to another configured provider."
+                f"Missing Codex credentials for credential_source {seam.diagnostic_credential_source!r}. "
+                f"Set environment variable {api_key_env} "
+                "or switch providers.codex.credential_source back to 'api_key_env'."
             )
         timeout = _provider_timeout_seconds(provider_config.get("timeout_seconds"), default=120.0)
         organization = provider_config.get("organization")
@@ -311,9 +316,8 @@ def provider_from_config(
             project=project.strip() if isinstance(project, str) else None,
         )
     if provider_name == "local":
-        backend = str(provider_config.get("backend", "ollama")).strip() or "ollama"
-        if backend != "ollama":
-            raise ProviderError("Config key providers.local.backend must be 'ollama'.")
+        seam = _provider_seam(provider_name, provider_config)
+        _ensure_runtime_support(seam)
         base_url = provider_config.get("base_url")
         if not isinstance(base_url, str) or not base_url.strip():
             raise ProviderError("Config key providers.local.base_url is required.")
@@ -388,8 +392,16 @@ def local_provider_status(
 ) -> LocalProviderStatus:
     """Return Ollama backend reachability and model names for diagnostics."""
 
-    backend = str(provider_config.get("backend", "ollama")).strip() or "ollama"
-    if backend != "ollama":
+    try:
+        seam = resolve_provider_seam(
+            "local",
+            provider_config,
+            error_factory=ProviderError,
+            error_prefix="providers.local",
+        )
+    except ProviderError as exc:
+        return LocalProviderStatus(False, [], f"Local provider configuration error: {exc}")
+    if seam.backend != BACKEND_OLLAMA:
         return LocalProviderStatus(False, [], "Only the 'ollama' local backend is supported.")
     base_url = provider_config.get("base_url")
     if not isinstance(base_url, str) or not base_url.strip():
@@ -415,6 +427,34 @@ def local_provider_status(
         return LocalProviderStatus(False, [], "Ollama tags response was not valid JSON.")
     models = _ollama_model_names(payload)
     return LocalProviderStatus(True, models, f"Ollama backend is reachable at {base_url}.")
+
+
+def provider_runtime_support(provider_name: str, provider_config: Mapping[str, Any]) -> tuple[ProviderSeam, str | None]:
+    """Return the resolved seam plus an implementation-gap message when unsupported."""
+
+    seam = _provider_seam(provider_name, provider_config)
+    supported, message = provider_seam_supported_for_runtime(seam)
+    return seam, None if supported else message
+
+
+def _provider_seam(provider_name: str, provider_config: Mapping[str, Any]) -> ProviderSeam:
+    try:
+        return resolve_provider_seam(
+            provider_name,
+            provider_config,
+            error_factory=ProviderError,
+            error_prefix=f"providers.{provider_name}",
+        )
+    except Exception as exc:
+        if isinstance(exc, ProviderError):
+            raise
+        raise ProviderError(str(exc)) from exc
+
+
+def _ensure_runtime_support(seam: ProviderSeam) -> None:
+    supported, message = provider_seam_supported_for_runtime(seam)
+    if not supported:
+        raise ProviderError(message or f"Provider {seam.provider_name!r} is not supported.")
 
 
 class MockProvider:

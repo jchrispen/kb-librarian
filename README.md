@@ -180,11 +180,15 @@ Important review files:
 
 The default operation routes use Anthropic. That means `kb ingest`, `kb context`, `kb explore`, and `kb compact` need `ANTHROPIC_API_KEY` unless you reconfigure providers in `.kb/config.yaml`.
 
-The generated config includes an opt-in `providers.codex` section for OpenAI Responses API compatible cloud routes. To use it, set operation routes to `provider: codex`, choose Codex model IDs, set `OPENAI_API_KEY` or the configured credential environment variable, and run `kb doctor` to verify the route configuration.
+Cloud providers now expose explicit backend and credential-source seams. The current runnable defaults remain `backend: direct_http` with `credential_source: api_key_env`, so existing API-key configs continue to work unchanged.
+
+The generated config includes an opt-in `providers.codex` section for OpenAI Responses API compatible cloud routes. To use it, set operation routes to `provider: codex`, choose Codex model IDs, set `OPENAI_API_KEY` or the configured credential environment variable, and run `kb doctor` to verify the route configuration and reported backend/auth-source metadata.
 
 The generated config also includes an opt-in `providers.local` section for Ollama. To run provider-backed operations locally, set the operation routes to `provider: local`, choose an installed Ollama model, start Ollama, and run `kb doctor` to verify reachability.
 
 Provider retries are configurable under `providers.retry` (`max_attempts`, `base_delay_seconds`, `max_delay_seconds`, `jitter_seconds`) and apply to provider-backed operations. Explicit provider policy is configured under `providers.policy`: `default_provider` supplies a provider when an operation omits one, and `fallback` lists bounded per-operation fallback routes that run only after transient failures exhaust retries.
+
+Recognized but not-yet-implemented Phase 6 seams such as `backend: vendor_cli`, `credential_source: vendor_cli`, `credential_source: token_env`, and `credential_source: command` fail explicitly instead of silently emulating API-key behavior.
 
 Privacy controls are configured under `privacy`. Set `cloud_llm_allowed: false` to block Anthropic/Codex provider attempts, use `blocked_topics` to block cloud calls for selected note topics when topic context is available, and use `redact_patterns` to redact provider-bound payload text without mutating stored KB artifacts.
 

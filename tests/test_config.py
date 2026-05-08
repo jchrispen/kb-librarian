@@ -27,6 +27,8 @@ def test_default_config_contains_phase_1_sections(tmp_path):
     assert "policy:" in rendered
     assert "default_provider: anthropic" in rendered
     assert "fallback: {}" in rendered
+    assert "backend: direct_http" in rendered
+    assert "credential_source: api_key_env" in rendered
     assert "codex:" in rendered
     assert "api_key_env: OPENAI_API_KEY" in rendered
     assert "local:" in rendered
@@ -244,6 +246,27 @@ def test_validate_config_accepts_codex_provider_routes(tmp_path):
     validate_config(config)
 
 
+def test_validate_config_accepts_vendor_cli_seams_without_breaking_defaults(tmp_path):
+    config = default_config(tmp_path)
+    config["providers"]["anthropic"] = {
+        "backend": "vendor_cli",
+        "credential_source": "vendor_cli",
+    }
+
+    validate_config(config)
+
+
+def test_validate_config_accepts_anthropic_token_env_vendor_cli_seam(tmp_path):
+    config = default_config(tmp_path)
+    config["providers"]["anthropic"] = {
+        "backend": "vendor_cli",
+        "credential_source": "token_env",
+        "token_env": "CLAUDE_CODE_OAUTH_TOKEN",
+    }
+
+    validate_config(config)
+
+
 def test_validate_config_rejects_malformed_codex_provider(tmp_path):
     config = default_config(tmp_path)
     config["providers"]["codex"]["api_key_env"] = ""
@@ -258,6 +281,25 @@ def test_validate_config_rejects_malformed_codex_provider(tmp_path):
     config = default_config(tmp_path)
     config["providers"]["codex"]["timeout_seconds"] = 0
     with pytest.raises(ConfigError, match="providers.codex.timeout_seconds"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["codex"] = {
+        "backend": "vendor_cli",
+        "credential_source": "token_env",
+        "token_env": "CODEX_TOKEN",
+        "base_url": "https://api.openai.com/v1",
+        "timeout_seconds": 120,
+    }
+    with pytest.raises(ConfigError, match="credential_source='token_env'.*backend 'vendor_cli'"):
+        validate_config(config)
+
+
+def test_validate_config_rejects_conflicting_provider_auth_settings(tmp_path):
+    config = default_config(tmp_path)
+    config["providers"]["anthropic"]["backend"] = "vendor_cli"
+    config["providers"]["anthropic"]["credential_source"] = "vendor_cli"
+    with pytest.raises(ConfigError, match="providers.anthropic.api_key_env conflicts"):
         validate_config(config)
 
 
@@ -275,6 +317,11 @@ def test_validate_config_rejects_malformed_local_provider(tmp_path):
     config = default_config(tmp_path)
     config["providers"]["local"]["timeout_seconds"] = 0
     with pytest.raises(ConfigError, match="providers.local.timeout_seconds"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["local"]["credential_source"] = "api_key_env"
+    with pytest.raises(ConfigError, match="providers.local.credential_source"):
         validate_config(config)
 
 

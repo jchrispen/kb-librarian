@@ -26,7 +26,7 @@ from kb_librarian.init import initialize_data_dir
 from kb_librarian.notes import read_note
 from kb_librarian.paths import DIRECTORIES, LOG_FILES, REVIEW_STATE_FILE, ROOT_FILES, config_path
 from kb_librarian.privacy import is_cloud_provider
-from kb_librarian.providers import local_provider_status, operation_routes
+from kb_librarian.providers import local_provider_status, operation_routes, provider_runtime_support
 from kb_librarian.retrieval import embedding_seam_status
 from kb_librarian.review import STATE_VERSION, ReviewStateError, validate_review_item
 from kb_librarian.search_index import load_backend, query_candidates
@@ -784,44 +784,56 @@ def _check_provider_routes(
                 )
             )
             continue
-        if provider_name == "anthropic":
-            api_key_env = provider_config.get("api_key_env")
-            if not isinstance(api_key_env, str) or not api_key_env.strip():
-                findings.append(
-                    DoctorFinding(
-                        "Providers",
-                        "error",
-                        "provider-api-env-missing",
-                        "Anthropic provider is missing api_key_env.",
-                    )
+        try:
+            seam, runtime_message = provider_runtime_support(provider_name, provider_config)
+        except ProviderError as exc:
+            findings.append(
+                DoctorFinding(
+                    "Providers",
+                    "error",
+                    "provider-config-invalid",
+                    f"Provider {provider_name!r} has invalid backend/auth config: {exc}",
                 )
-            elif not env.get(api_key_env):
+            )
+            continue
+        findings.append(
+            DoctorFinding(
+                "Providers",
+                "ok",
+                "provider-seam",
+                f"Provider {provider_name!r} uses backend={seam.backend} credential_source={seam.diagnostic_credential_source}.",
+            )
+        )
+        if runtime_message is not None:
+            findings.append(
+                DoctorFinding(
+                    "Providers",
+                    "error",
+                    "provider-runtime-unsupported",
+                    runtime_message,
+                )
+            )
+            continue
+        if provider_name == "anthropic":
+            api_key_env = seam.api_key_env or "ANTHROPIC_API_KEY"
+            if not env.get(api_key_env):
                 findings.append(
                     DoctorFinding(
                         "Providers",
                         "warn",
                         "provider-api-key-unset",
-                        f"Environment variable {api_key_env} is not set for provider-backed commands.",
+                        f"Environment variable {api_key_env} is not set for backend={seam.backend} credential_source={seam.diagnostic_credential_source}.",
                     )
                 )
         elif provider_name == "codex":
-            api_key_env = provider_config.get("api_key_env")
-            if not isinstance(api_key_env, str) or not api_key_env.strip():
-                findings.append(
-                    DoctorFinding(
-                        "Providers",
-                        "error",
-                        "codex-provider-api-env-missing",
-                        "Codex provider is missing api_key_env.",
-                    )
-                )
-            elif not env.get(api_key_env):
+            api_key_env = seam.api_key_env or "OPENAI_API_KEY"
+            if not env.get(api_key_env):
                 findings.append(
                     DoctorFinding(
                         "Providers",
                         "warn",
                         "codex-provider-api-key-unset",
-                        f"Environment variable {api_key_env} is not set for Codex-routed commands.",
+                        f"Environment variable {api_key_env} is not set for backend={seam.backend} credential_source={seam.diagnostic_credential_source}.",
                     )
                 )
             else:
@@ -830,7 +842,7 @@ def _check_provider_routes(
                         "Providers",
                         "ok",
                         "codex-provider-credentials",
-                        f"Codex provider credential environment variable {api_key_env} is set.",
+                        f"Codex provider credential environment variable {api_key_env} is set for backend={seam.backend}.",
                     )
                 )
         elif provider_name == "local":

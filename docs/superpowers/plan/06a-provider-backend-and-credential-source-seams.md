@@ -2,7 +2,9 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
-Status: Pending
+Status: Complete
+
+Completed: 2026-05-08
 
 ## Goal
 
@@ -86,3 +88,28 @@ Introduce minimal backend, credential-source, and delegation seams so additional
 
 - Shipping new local backends.
 - Shipping vendor CLI account-auth flows.
+
+## Completion Record
+
+Completed on 2026-05-08.
+
+Implemented files:
+
+- `src/kb_librarian/provider_seams.py`
+- `src/kb_librarian/config.py`
+- `src/kb_librarian/providers.py`
+- `src/kb_librarian/doctor.py`
+- `tests/test_config.py`
+- `tests/test_providers.py`
+- `tests/test_doctor.py`
+- `tests/test_cli.py`
+- `README.md`
+- `docs/configuration.md`
+- `docs/command-reference.md`
+- `docs/superpowers/plan/06-provider-backends-and-account-auth.md`
+- `docs/superpowers/plan/06a-provider-backend-and-credential-source-seams.md`
+
+Verification:
+
+- `python3 -m pytest --override-ini addopts='' tests/test_config.py tests/test_providers.py tests/test_doctor.py -q` - passed, 60 passed.
+- `python3 -m pytest --override-ini addopts='' tests/test_cli.py::test_kb_context_codex_missing_key_failure_surface -q` - passed, 1 passed.

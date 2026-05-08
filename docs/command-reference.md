@@ -43,7 +43,7 @@ kb doctor [--data-dir <path>] [--self-test]
 
 `kb doctor` groups findings by subsystem and prints `ok`, `warn`, or `error` severities. It returns nonzero when any `error` finding is present.
 
-Checks include required layout, config validity, note schema validity, duplicate IDs, broken note ID references, review state readability, ingest lock/checkpoint recovery state, markdown index freshness, backlinks, manifest freshness, lexical index freshness, raw ingest errors, parser dependency availability, auto-commit configuration, provider route and fallback policy presence, privacy/cloud-provider conflicts, Codex credential presence when any primary or fallback route uses `provider: codex`, and local-provider reachability when any primary or fallback route uses `provider: local`.
+Checks include required layout, config validity, note schema validity, duplicate IDs, broken note ID references, review state readability, ingest lock/checkpoint recovery state, markdown index freshness, backlinks, manifest freshness, lexical index freshness, raw ingest errors, parser dependency availability, auto-commit configuration, provider route and fallback policy presence, active provider backend and credential-source metadata, privacy/cloud-provider conflicts, Codex credential presence when any primary or fallback route uses `provider: codex`, and local-provider reachability when any primary or fallback route uses `provider: local`.
 
 `kb doctor --self-test` creates a temporary KB, configures the deterministic mock provider, ingests one tiny fixture, rebuilds indexes, searches it, and runs doctor against the fixture. It is offline and does not mutate your configured KB.
 

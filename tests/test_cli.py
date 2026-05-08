@@ -668,7 +668,7 @@ def test_kb_context_codex_missing_key_failure_surface(tmp_path):
     )
 
     assert result.returncode == 1
-    assert "Missing Codex provider API key" in result.stderr
+    assert "Missing Codex credentials for credential_source 'api_key_env'" in result.stderr
     assert "OPENAI_API_KEY" in result.stderr
 
 

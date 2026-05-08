@@ -58,6 +58,7 @@ def test_doctor_reports_healthy_kb_after_reindex(tmp_path):
     assert "[ok] config-valid" in rendered
     assert "[ok] fts-current" in rendered
     assert "embedding-seam-disabled" in rendered
+    assert "provider-seam" in rendered
     assert "[ok] provider-routes" in rendered
 
 
@@ -254,6 +255,25 @@ def test_doctor_reports_codex_credentials_when_routed(tmp_path):
 
     assert report.error_count == 0
     assert "codex-provider-credentials" in rendered
+    assert "backend=direct_http credential_source=api_key_env" in rendered
+
+
+def test_doctor_reports_unimplemented_vendor_cli_runtime(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    config["providers"]["anthropic"] = {
+        "backend": "vendor_cli",
+        "credential_source": "vendor_cli",
+    }
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 1
+    assert "provider-seam" in rendered
+    assert "provider-runtime-unsupported" in rendered
+    assert "backend=vendor_cli credential_source=vendor_cli" in rendered
 
 
 def test_doctor_warns_when_privacy_blocks_cloud_routes(tmp_path):

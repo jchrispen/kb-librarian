@@ -354,8 +354,24 @@ def test_provider_from_config_builds_codex_provider():
     assert isinstance(provider, CodexProvider)
 
 
+def test_provider_from_config_preserves_legacy_api_key_config():
+    provider = provider_from_config(
+        {
+            "providers": {
+                "anthropic": {
+                    "api_key_env": "ANTHROPIC_API_KEY",
+                }
+            }
+        },
+        "anthropic",
+        env={"ANTHROPIC_API_KEY": "test-key"},
+    )
+
+    assert provider.__class__.__name__ == "AnthropicProvider"
+
+
 def test_provider_from_config_requires_codex_api_key():
-    with pytest.raises(ProviderError, match="Missing Codex provider API key"):
+    with pytest.raises(ProviderError, match="Missing Codex credentials for credential_source 'api_key_env'"):
         provider_from_config(
             {
                 "providers": {
@@ -366,6 +382,22 @@ def test_provider_from_config_requires_codex_api_key():
                 }
             },
             "codex",
+            env={},
+        )
+
+
+def test_provider_from_config_rejects_unimplemented_vendor_cli_backend():
+    with pytest.raises(ProviderError, match="backend='vendor_cli'.*not implemented yet"):
+        provider_from_config(
+            {
+                "providers": {
+                    "anthropic": {
+                        "backend": "vendor_cli",
+                        "credential_source": "vendor_cli",
+                    }
+                }
+            },
+            "anthropic",
             env={},
         )
 

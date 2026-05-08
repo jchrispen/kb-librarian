@@ -20,6 +20,11 @@ from kb_librarian.paths import (
     is_control_dir,
     is_library_dir_next_to_control_dir,
 )
+from kb_librarian.provider_seams import (
+    BACKEND_DIRECT_HTTP,
+    CREDENTIAL_SOURCE_API_KEY_ENV,
+    validate_provider_seam_config,
+)
 
 PROVIDER_CONTROL_KEYS = {"retry", "policy"}
 MAX_PROVIDER_FALLBACKS_PER_OPERATION = 4
@@ -86,9 +91,13 @@ def default_config(data_dir: str | Path | None = None, *, hooks: bool = False) -
         "data_dir": str(Path(data_dir).expanduser()),
         "providers": {
             "anthropic": {
+                "backend": BACKEND_DIRECT_HTTP,
+                "credential_source": CREDENTIAL_SOURCE_API_KEY_ENV,
                 "api_key_env": "ANTHROPIC_API_KEY",
             },
             "codex": {
+                "backend": BACKEND_DIRECT_HTTP,
+                "credential_source": CREDENTIAL_SOURCE_API_KEY_ENV,
                 "api_key_env": "OPENAI_API_KEY",
                 "base_url": "https://api.openai.com/v1",
                 "timeout_seconds": 120,
@@ -294,16 +303,23 @@ def validate_config(config: Mapping[str, Any]) -> None:
     anthropic = config["providers"]["anthropic"]
     if not isinstance(anthropic, Mapping):
         raise ConfigError("Config section providers.anthropic must be a mapping.")
-    if not anthropic.get("api_key_env"):
-        raise ConfigError("Config key providers.anthropic.api_key_env is required.")
+    validate_provider_seam_config(
+        "anthropic",
+        anthropic,
+        error_factory=ConfigError,
+        error_prefix="providers.anthropic",
+    )
 
     codex = config["providers"].get("codex")
     if codex is not None:
         if not isinstance(codex, Mapping):
             raise ConfigError("Config section providers.codex must be a mapping when present.")
-        api_key_env = codex.get("api_key_env")
-        if not isinstance(api_key_env, str) or not api_key_env.strip():
-            raise ConfigError("Config key providers.codex.api_key_env must be a non-empty string.")
+        validate_provider_seam_config(
+            "codex",
+            codex,
+            error_factory=ConfigError,
+            error_prefix="providers.codex",
+        )
         base_url = codex.get("base_url")
         if not isinstance(base_url, str) or not base_url.strip():
             raise ConfigError("Config key providers.codex.base_url must be a non-empty URL.")
@@ -316,9 +332,12 @@ def validate_config(config: Mapping[str, Any]) -> None:
     if local is not None:
         if not isinstance(local, Mapping):
             raise ConfigError("Config section providers.local must be a mapping when present.")
-        backend = local.get("backend", "ollama")
-        if backend != "ollama":
-            raise ConfigError("Config key providers.local.backend must be 'ollama'.")
+        validate_provider_seam_config(
+            "local",
+            local,
+            error_factory=ConfigError,
+            error_prefix="providers.local",
+        )
         base_url = local.get("base_url")
         if not isinstance(base_url, str) or not base_url.strip():
             raise ConfigError("Config key providers.local.base_url must be a non-empty URL.")
@@ -339,6 +358,18 @@ def validate_config(config: Mapping[str, Any]) -> None:
         max_delay = float(retry.get("max_delay_seconds", 0.0) or 0.0)
         if max_delay < base_delay:
             raise ConfigError("Config key providers.retry.max_delay_seconds must be >= base_delay_seconds.")
+
+    for provider_name, provider_config in config["providers"].items():
+        if provider_name in PROVIDER_CONTROL_KEYS or provider_name in {"anthropic", "codex", "local"}:
+            continue
+        if not isinstance(provider_config, Mapping):
+            raise ConfigError(f"Config section providers.{provider_name} must be a mapping when present.")
+        validate_provider_seam_config(
+            str(provider_name),
+            provider_config,
+            error_factory=ConfigError,
+            error_prefix=f"providers.{provider_name}",
+        )
 
     _validate_provider_policy(config)
 
