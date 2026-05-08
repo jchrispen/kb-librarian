@@ -47,6 +47,10 @@ REQUIRED_SECTION_KEYS = {
         "index_token_cap",
         "lexical_index",
         "embeddings",
+        "embedding_index_path",
+        "embedding_provider",
+        "embedding_model",
+        "embedding_dimensions",
         "title_weight",
         "summary_weight",
         "retrieval_phrase_weight",
@@ -119,6 +123,10 @@ def default_config(data_dir: str | Path | None = None, *, hooks: bool = False) -
             "index_token_cap": 5000,
             "lexical_index": True,
             "embeddings": False,
+            "embedding_index_path": ".kb/embeddings.sqlite",
+            "embedding_provider": None,
+            "embedding_model": None,
+            "embedding_dimensions": None,
             "title_weight": 5,
             "summary_weight": 4,
             "retrieval_phrase_weight": 4,
@@ -352,6 +360,9 @@ def validate_config(config: Mapping[str, Any]) -> None:
                 f"Config operation {operation}.provider is required when providers.policy.default_provider is unset."
             )
 
+    retrieval = config["retrieval"]
+    _validate_retrieval_config(retrieval)
+
     indexes = config["indexes"]
     for key in ("topic_page_size", "top_level_page_size"):
         if key not in indexes:
@@ -387,6 +398,52 @@ def validate_config(config: Mapping[str, Any]) -> None:
             re.compile(pattern)
         except re.error as exc:
             raise ConfigError(f"Config key privacy.redact_patterns[{index}] is not a valid regex: {exc}") from exc
+
+
+def _validate_retrieval_config(retrieval: Mapping[str, Any]) -> None:
+    for key in (
+        "default_budget_tokens",
+        "context_budget_tokens",
+        "explore_budget_tokens",
+        "index_token_cap",
+    ):
+        _validate_positive_int(retrieval, f"retrieval.{key}", minimum=1)
+
+    for key in (
+        "lexical_index",
+        "embeddings",
+    ):
+        value = retrieval.get(key)
+        if not isinstance(value, bool):
+            raise ConfigError(f"Config key retrieval.{key} must be a boolean.")
+
+    if not retrieval.get("lexical_index"):
+        raise ConfigError("Config key retrieval.lexical_index must remain true until another retrieval source is supported.")
+
+    index_path = retrieval.get("embedding_index_path")
+    if not isinstance(index_path, str) or not index_path.strip():
+        raise ConfigError("Config key retrieval.embedding_index_path must be a non-empty relative path.")
+    parsed_path = Path(index_path.strip())
+    if parsed_path.is_absolute() or ".." in parsed_path.parts:
+        raise ConfigError("Config key retrieval.embedding_index_path must be relative and stay inside the data directory.")
+
+    for key in ("embedding_provider", "embedding_model"):
+        value = retrieval.get(key)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise ConfigError(f"Config key retrieval.{key} must be null or a non-empty string.")
+
+    dimensions = retrieval.get("embedding_dimensions")
+    if dimensions is not None and (isinstance(dimensions, bool) or not isinstance(dimensions, int) or dimensions <= 0):
+        raise ConfigError("Config key retrieval.embedding_dimensions must be null or a positive integer.")
+
+    for key in (
+        "title_weight",
+        "summary_weight",
+        "retrieval_phrase_weight",
+        "tag_weight",
+        "body_weight",
+    ):
+        _validate_positive_number(retrieval, f"retrieval.{key}")
 
 
 def _validate_positive_int(section: Mapping[str, Any], key: str, *, minimum: int) -> None:

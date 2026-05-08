@@ -6,6 +6,7 @@ from kb_librarian.config import default_config
 from kb_librarian.indexing import index_document, reindex_data_dir
 from kb_librarian.init import initialize_data_dir
 from kb_librarian.notes import Note, write_note
+from kb_librarian.retrieval import CandidateQuery, candidate_source_from_config, ranker_from_config
 from kb_librarian.search_index import score_document, tokenize_query
 from kb_librarian.storage import canonical_note_path
 
@@ -305,3 +306,27 @@ def test_retrieval_uses_lexical_index_when_markdown_indexes_are_paginated(tmp_pa
 
     assert (tmp_path / "topics" / "agent-systems" / "INDEX-2.md").is_file()
     assert target_id in [match["id"] for match in matches]
+
+
+def test_retrieval_seam_uses_lexical_source_and_ranker_by_default(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    target_id = "2026-05-05-seam-note"
+    note = Note(
+        _note_frontmatter(
+            note_id=target_id,
+            title="Embedding seam retrieval",
+            topic="agent-systems",
+            summary="Lexical retrieval remains the active source.",
+        ),
+        "Future embedding support should not change default lexical retrieval.\n",
+    )
+    write_note(canonical_note_path(tmp_path, "agent-systems", target_id), note)
+    reindex_data_dir(tmp_path, config=config)
+
+    source = candidate_source_from_config(tmp_path, config)
+    candidates = source.candidates(CandidateQuery("embedding seam retrieval"))
+    ranked = ranker_from_config(config).rank(candidates, query="embedding seam retrieval")
+
+    assert source.name == "lexical"
+    assert [item["id"] for item in ranked] == [target_id]

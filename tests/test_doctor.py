@@ -57,7 +57,25 @@ def test_doctor_reports_healthy_kb_after_reindex(tmp_path):
     assert report.error_count == 0
     assert "[ok] config-valid" in rendered
     assert "[ok] fts-current" in rendered
+    assert "embedding-seam-disabled" in rendered
     assert "[ok] provider-routes" in rendered
+
+
+def test_doctor_reports_embedding_seam_enabled_as_unsupported(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = _mock_config(tmp_path)
+    config["retrieval"]["embeddings"] = True
+    config["retrieval"]["embedding_provider"] = "local"
+    config["retrieval"]["embedding_model"] = "nomic-embed-text"
+    config["retrieval"]["embedding_dimensions"] = 768
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 0
+    assert "embeddings-unsupported" in rendered
+    assert "lexical retrieval remains active" in rendered
 
 
 def test_doctor_reports_broken_links_and_stale_fts(tmp_path):

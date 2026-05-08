@@ -2,7 +2,8 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
-Status: Pending
+Status: Complete
+Completed: 2026-05-07
 
 ## Goal
 
@@ -73,3 +74,24 @@ Prepare retrieval and indexing interfaces for future embedding-based retrieval w
 - Embedding generation.
 - Vector index build/query implementation.
 - Hybrid scoring rollout.
+
+## Completion Record
+
+Completed on 2026-05-07.
+
+Implemented files:
+
+- `src/kb_librarian/config.py`
+- `src/kb_librarian/retrieval.py`
+- `src/kb_librarian/context.py`
+- `src/kb_librarian/cli.py`
+- `src/kb_librarian/doctor.py`
+- `docs/configuration.md`
+- `tests/test_config.py`
+- `tests/test_indexing.py`
+- `tests/test_doctor.py`
+
+Verification:
+
+- `pytest tests/test_config.py tests/test_indexing.py tests/test_context.py tests/test_doctor.py` - 50 passed
+- `pytest` - 193 passed, 3 skipped

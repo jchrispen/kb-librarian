@@ -12,7 +12,8 @@ from kb_librarian.indexing import reindex_data_dir
 from kb_librarian.provider_retry import RetryEvent, retry_policy_from_config
 from kb_librarian.privacy import redact_payload, redact_text
 from kb_librarian.providers import ProviderFallbackEvent, call_with_provider_policy, provider_from_config
-from kb_librarian.search_index import query_candidates, tokenize_query
+from kb_librarian.retrieval import CandidateQuery, candidate_source_from_config
+from kb_librarian.search_index import tokenize_query
 from kb_librarian.storage import NOTE_ID_REFERENCE_PATTERN, NoteRecord, load_note_records
 from kb_librarian.usage import note_usage_counts
 
@@ -126,7 +127,8 @@ def build_context(
     if not fts_path.exists():
         reindex_data_dir(data_dir)
 
-    candidates = query_candidates(fts_path, query=task, topic=None, knowledge_type=None)
+    source = candidate_source_from_config(data_dir, config)
+    candidates = source.candidates(CandidateQuery(task))
     if not candidates:
         return ContextResult(
             task=task,
@@ -242,7 +244,8 @@ def build_explore(
         reindex_data_dir(data_dir)
 
     by_id = {record.note_id: record for record in records}
-    indexed_candidates = query_candidates(fts_path, query=problem, topic=None, knowledge_type=None)
+    source = candidate_source_from_config(data_dir, config)
+    indexed_candidates = source.candidates(CandidateQuery(problem))
     indexed_ids = {str(candidate.get("id", "")).strip() for candidate in indexed_candidates}
     backlinks = _load_backlinks(data_dir)
     tokens = _explore_tokens(problem)

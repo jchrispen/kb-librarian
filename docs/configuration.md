@@ -74,6 +74,10 @@ retrieval:
   index_token_cap: 5000
   lexical_index: true
   embeddings: false
+  embedding_index_path: .kb/embeddings.sqlite
+  embedding_provider: null
+  embedding_model: null
+  embedding_dimensions: null
   title_weight: 5
   summary_weight: 4
   retrieval_phrase_weight: 4
@@ -259,11 +263,17 @@ Useful retrieval settings:
 
 - `context_budget_tokens`: default token budget for `kb context`
 - `explore_budget_tokens`: default token budget for `kb explore`
+- `lexical_index`: must remain `true`; lexical retrieval is the active retrieval source
+- `embeddings`: future seam only; default `false` and not supported as an active retrieval source yet
+- `embedding_index_path`: future generated embedding index path, relative to the data directory
+- `embedding_provider`, `embedding_model`, `embedding_dimensions`: validated future embedding settings
 - `title_weight`: title match weight in lexical ranking
 - `summary_weight`: summary match weight
 - `retrieval_phrase_weight`: retrieval phrase match weight
 - `tag_weight`: tag match weight
 - `body_weight`: body text match weight
+
+`kb doctor` reports the embedding seam status. If `retrieval.embeddings` is set to `true`, doctor warns that embedding retrieval is deferred and lexical retrieval remains active.
 
 Retrieval commands also write append-only usage signals to `.kb/usage.log`. Empty, weak, or explicitly reported poor searches write `.kb/search-misses.log`; suspect-note feedback from `kb flag-suspect` is also appended to `.kb/usage.log`. Aggregate counters in `.kb/stats.json` are rebuildable from those logs.
 

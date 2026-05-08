@@ -39,7 +39,7 @@ from kb_librarian.review import (
     reject_review_item,
     render_review_summary,
 )
-from kb_librarian.search_index import query_candidates, score_document, tokenize_query
+from kb_librarian.retrieval import CandidateQuery, candidate_source_from_config, ranker_from_config
 from kb_librarian.storage import (
     NoteRecord,
     canonical_note_path,
@@ -842,38 +842,10 @@ def _handle_search(args: argparse.Namespace) -> int:
     if not fts_path.exists():
         reindex_data_dir(data_dir)
 
-    candidates = query_candidates(
-        fts_path,
-        query=args.query,
-        topic=args.topic,
-        knowledge_type=args.knowledge_type,
-    )
+    source = candidate_source_from_config(data_dir, config)
+    candidates = source.candidates(CandidateQuery(args.query, topic=args.topic, knowledge_type=args.knowledge_type))
     retrieval = config["retrieval"]
-    tokens = tokenize_query(args.query)
-    scored: list[dict[str, object]] = []
-    for candidate in candidates:
-        score = score_document(
-            candidate,
-            query=args.query,
-            tokens=tokens,
-            weights=retrieval,
-        )
-        if score <= 0:
-            continue
-        scored.append(
-            {
-                **candidate,
-                "score": score,
-            }
-        )
-
-    scored.sort(
-        key=lambda item: (
-            -float(item["score"]),
-            str(item.get("updated", "")),
-            str(item.get("id", "")),
-        )
-    )
+    scored = ranker_from_config(config).rank(candidates, query=args.query)
     budget = args.budget if args.budget is not None else int(retrieval["default_budget_tokens"])
     if budget <= 0:
         raise KBLibrarianError("Search budget must be a positive integer.")

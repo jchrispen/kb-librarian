@@ -27,6 +27,7 @@ from kb_librarian.notes import read_note
 from kb_librarian.paths import DIRECTORIES, LOG_FILES, REVIEW_STATE_FILE, ROOT_FILES, config_path
 from kb_librarian.privacy import is_cloud_provider
 from kb_librarian.providers import local_provider_status, operation_routes
+from kb_librarian.retrieval import embedding_seam_status
 from kb_librarian.review import STATE_VERSION, ReviewStateError, validate_review_item
 from kb_librarian.search_index import load_backend, query_candidates
 from kb_librarian.storage import NOTE_ID_REFERENCE_PATTERN, NoteRecord, iter_note_files
@@ -117,6 +118,7 @@ def run_doctor(data_dir: str | Path, *, env: Mapping[str, str] | None = None) ->
     _check_raw_ingest_errors(root, findings)
     if config is not None:
         _check_parser_dependencies(findings)
+        _check_embedding_seam(config, findings)
         _check_auto_commit_config(root, config, findings)
         _check_provider_routes(config, environ, findings)
 
@@ -654,6 +656,39 @@ def _check_fts(data_dir: Path, records: list[NoteRecord], findings: list[DoctorF
         )
         return
     findings.append(DoctorFinding("Retrieval", "ok", "fts-current", f"Lexical index is current using {backend}.", path))
+
+
+def _check_embedding_seam(config: Mapping[str, Any], findings: list[DoctorFinding]) -> None:
+    status = embedding_seam_status(config)
+    index_path = status.get("index_path")
+    if status["enabled"]:
+        findings.append(
+            DoctorFinding(
+                "Retrieval",
+                "warn",
+                "embeddings-unsupported",
+                "retrieval.embeddings is enabled, but embedding retrieval is deferred; lexical retrieval remains active.",
+            )
+        )
+        return
+    if status["configured"]:
+        findings.append(
+            DoctorFinding(
+                "Retrieval",
+                "ok",
+                "embedding-seam-configured",
+                f"Embedding settings are configured for a future unsupported index at {index_path}; embeddings are disabled.",
+            )
+        )
+    else:
+        findings.append(
+            DoctorFinding(
+                "Retrieval",
+                "ok",
+                "embedding-seam-disabled",
+                "Embedding retrieval is disabled; lexical retrieval is the active source.",
+            )
+        )
 
 
 def _check_raw_ingest_errors(data_dir: Path, findings: list[DoctorFinding]) -> None:

@@ -34,6 +34,10 @@ def test_default_config_contains_phase_1_sections(tmp_path):
     assert "base_url: http://127.0.0.1:11434" in rendered
     assert "operations:" in rendered
     assert "retrieval:" in rendered
+    assert "embedding_index_path: .kb/embeddings.sqlite" in rendered
+    assert "embedding_provider: null" in rendered
+    assert "embedding_model: null" in rendered
+    assert "embedding_dimensions: null" in rendered
     assert "ingest:" in rendered
     assert "indexes:" in rendered
     assert "review:" in rendered
@@ -117,6 +121,33 @@ def test_validate_config_reports_missing_required_key(tmp_path):
     del config["retrieval"]["body_weight"]
 
     with pytest.raises(ConfigError, match="retrieval.*body_weight"):
+        validate_config(config)
+
+
+def test_validate_config_rejects_malformed_embedding_seam(tmp_path):
+    config = default_config(tmp_path)
+    config["retrieval"]["embeddings"] = "yes"
+    with pytest.raises(ConfigError, match="retrieval.embeddings"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["retrieval"]["lexical_index"] = False
+    with pytest.raises(ConfigError, match="retrieval.lexical_index"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["retrieval"]["embedding_index_path"] = "../embeddings.sqlite"
+    with pytest.raises(ConfigError, match="retrieval.embedding_index_path"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["retrieval"]["embedding_provider"] = ""
+    with pytest.raises(ConfigError, match="retrieval.embedding_provider"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["retrieval"]["embedding_dimensions"] = 0
+    with pytest.raises(ConfigError, match="retrieval.embedding_dimensions"):
         validate_config(config)
 
 
