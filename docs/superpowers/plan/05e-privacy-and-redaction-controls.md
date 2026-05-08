@@ -94,7 +94,7 @@ Implemented files:
 - `tests/test_doctor.py`
 - `README.md`
 - `docs/configuration.md`
-- `docs/commands.md`
+- `docs/command-reference.md`
 - `docs/user-guide.md`
 - `docs/troubleshooting.md`
 - `docs/superpowers/plan/05-provider-expansion-and-local-first.md`

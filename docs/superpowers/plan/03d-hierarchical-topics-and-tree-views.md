@@ -90,7 +90,7 @@ Implemented files:
 - `tests/test_indexing.py`
 - `tests/test_cli.py`
 - `README.md`
-- `docs/commands.md`
+- `docs/command-reference.md`
 - `docs/user-guide.md`
 
 Verification:

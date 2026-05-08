@@ -86,7 +86,7 @@ Implemented files:
 - `src/kb_librarian/config.py`: added default `providers.local` config and validation.
 - `src/kb_librarian/doctor.py`: added routed local-provider reachability/model diagnostics.
 - `tests/test_config.py`, `tests/test_providers.py`, `tests/test_ingest.py`, `tests/test_context.py`, `tests/test_compaction.py`, `tests/test_doctor.py`: added local config, adapter, doctor, and operation-route coverage.
-- `README.md`, `docs/configuration.md`, `docs/commands.md`, `docs/troubleshooting.md`: documented local-provider configuration and diagnostics.
+- `README.md`, `docs/configuration.md`, `docs/command-reference.md`, `docs/troubleshooting.md`: documented local-provider configuration and diagnostics.
 
 Verification:
 

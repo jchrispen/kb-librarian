@@ -87,7 +87,7 @@ Implemented files:
 - `tests/test_config.py`
 - `tests/test_doctor.py`
 - `README.md`
-- `docs/commands.md`
+- `docs/command-reference.md`
 - `docs/configuration.md`
 - `docs/troubleshooting.md`
 - `docs/user-guide.md`

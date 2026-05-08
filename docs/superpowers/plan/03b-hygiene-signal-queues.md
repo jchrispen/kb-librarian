@@ -102,7 +102,7 @@ Implemented files:
 - `tests/test_cli.py`
 - `tests/test_usage.py`
 - `README.md`
-- `docs/commands.md`
+- `docs/command-reference.md`
 - `docs/configuration.md`
 - `docs/user-guide.md`
 

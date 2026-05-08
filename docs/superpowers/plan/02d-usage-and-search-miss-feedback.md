@@ -98,7 +98,7 @@ Implemented files:
 - `src/kb_librarian/review.py`
 - `tests/test_usage.py`
 - `tests/test_cli.py`
-- `docs/commands.md`
+- `docs/command-reference.md`
 - `docs/user-guide.md`
 - `docs/configuration.md`
 

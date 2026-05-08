@@ -52,3 +52,13 @@ Each milestone must be:
 - Explicit about public interfaces, data/state changes, tests, acceptance criteria, and out-of-scope items.
 
 Avoid large omnibus task lists. Split work by runnable increments, not by abstract subsystem. Do not create implementation code unless explicitly requested.
+
+## Repo Command Specs
+
+For repo-local slash-style requests, use `docs/commands/` as the command-spec directory.
+
+- Supported initial command specs live at `docs/commands/release/SKILL.md`, `docs/commands/milestone-ship/SKILL.md`, and `docs/commands/coverage/SKILL.md`.
+- When a user invokes one of those commands, read only the requested `docs/commands/<name>/SKILL.md` file first instead of loading the whole directory.
+- Treat these `SKILL.md` files as repo command playbooks, not as global standing instructions or native runtime skills.
+- Instruction precedence remains: direct user request, then `AGENTS.md`, then the selected command spec, then other repo docs.
+- Keep command specs short, procedural, and heavy on file references rather than duplicated design detail.

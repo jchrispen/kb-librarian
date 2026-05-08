@@ -93,7 +93,7 @@ Implemented files:
 - `pyproject.toml`
 - `tests/test_ingest.py`
 - `README.md`
-- `docs/commands.md`
+- `docs/command-reference.md`
 - `docs/user-guide.md`
 - `docs/superpowers/plan/04-robustness-and-polish.md`
 - `docs/superpowers/plan/04c-pdf-and-html-ingest-parsing.md`

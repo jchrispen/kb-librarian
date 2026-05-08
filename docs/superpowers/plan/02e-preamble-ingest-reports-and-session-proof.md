@@ -99,7 +99,7 @@ Implemented files:
 - `tests/test_ingest.py`
 - `tests/test_cli.py`
 - `README.md`
-- `docs/commands.md`
+- `docs/command-reference.md`
 - `docs/configuration.md`
 - `docs/user-guide.md`
 

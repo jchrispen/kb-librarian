@@ -103,7 +103,7 @@ Implemented files:
 - `tests/fixtures/golden_corpus/raw/03-citation-grounding-heuristic.md`
 - `README.md`
 - `docs/configuration.md`
-- `docs/commands.md`
+- `docs/command-reference.md`
 - `docs/user-guide.md`
 
 Verification:

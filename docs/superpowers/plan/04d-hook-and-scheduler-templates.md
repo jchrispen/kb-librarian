@@ -85,7 +85,7 @@ Provide optional automation templates without changing the default manual postur
   - `src/kb_librarian/cli.py`
   - `tests/test_init.py`
   - `tests/test_cli.py`
-  - `docs/commands.md`
+  - `docs/command-reference.md`
   - `docs/user-guide.md`
   - `docs/configuration.md`
 - Verification:

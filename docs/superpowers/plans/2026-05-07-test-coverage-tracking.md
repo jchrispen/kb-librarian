@@ -17,5 +17,5 @@ Add repository-local code coverage measurement so standard `pytest` runs report 
 
 ## Completion Record
 
-- Implemented in `pyproject.toml`, `README.md`, `docs/commands.md`, and `docs/user-guide.md`.
+- Implemented in `pyproject.toml`, `README.md`, `docs/command-reference.md`, and `docs/user-guide.md`.
 - Verification: `./.venv/bin/python -m pytest -q` -> `195 passed, 1 skipped`, total coverage `79%` with subprocess-driven CLI tests included.

@@ -195,7 +195,7 @@ For offline development or tests, the codebase also supports a deterministic `mo
 - [User Guide](docs/user-guide.md)
 - [Codex KB Demo Guide](docs/codex-kb-demo.md)
 - [Configuration Reference](docs/configuration.md)
-- [Command Reference](docs/commands.md)
+- [Command Reference](docs/command-reference.md)
 - [Release Guide](docs/releasing.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Canonical Design Spec](docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md)

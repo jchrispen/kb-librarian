@@ -93,7 +93,7 @@ Implemented files:
 - `tests/test_context.py`
 - `tests/test_providers.py`
 - `tests/test_cli.py`
-- `docs/commands.md`
+- `docs/command-reference.md`
 - `docs/user-guide.md`
 - `docs/configuration.md`
 

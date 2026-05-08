@@ -99,7 +99,7 @@ Implemented files:
 - `tests/test_doctor.py`
 - `tests/test_cli.py`
 - `README.md`
-- `docs/commands.md`
+- `docs/command-reference.md`
 - `docs/user-guide.md`
 - `docs/troubleshooting.md`
 
