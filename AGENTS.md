@@ -57,7 +57,7 @@ Avoid large omnibus task lists. Split work by runnable increments, not by abstra
 
 For repo-local slash-style requests, use `docs/commands/` as the command-spec directory.
 
-- Supported initial command specs live at `docs/commands/release/SKILL.md`, `docs/commands/milestone-ship/SKILL.md`, and `docs/commands/coverage/SKILL.md`.
+- Supported command specs live at `docs/commands/release/SKILL.md`, `docs/commands/milestone-ship/SKILL.md`, `docs/commands/coverage/SKILL.md`, and `docs/commands/kb/SKILL.md`.
 - When a user invokes one of those commands, read only the requested `docs/commands/<name>/SKILL.md` file first instead of loading the whole directory.
 - Treat these `SKILL.md` files as repo command playbooks, not as global standing instructions or native runtime skills.
 - Instruction precedence remains: direct user request, then `AGENTS.md`, then the selected command spec, then other repo docs.
