@@ -16,6 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 test = [
     "pytest>=8",
+    "pytest-cov>=5",
 ]
 
 [project.scripts]
@@ -25,5 +26,18 @@ kb = "kb_librarian.cli:main"
 where = ["src"]
 
 [tool.pytest.ini_options]
+addopts = [
+    "--cov=kb_librarian",
+    "--cov-report=term-missing:skip-covered",
+]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+patch = ["subprocess"]
+source = ["kb_librarian"]
+
+[tool.coverage.report]
+skip_covered = true
+show_missing = true

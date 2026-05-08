@@ -191,6 +191,8 @@ For deterministic extraction/retrieval regression checks, run:
 pytest -q tests/test_golden_corpus.py
 ```
 
+Standard `pytest` runs also emit terminal code coverage for `kb_librarian`.
+
 ## Search and Inspect Notes
 
 Use `kb search` for precise lookup:

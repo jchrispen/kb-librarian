@@ -252,6 +252,8 @@ Deterministic golden corpus checks are shipped as tests using the mock provider:
 pytest -q tests/test_golden_corpus.py
 ```
 
+Standard `pytest` runs also emit terminal code coverage for `kb_librarian`.
+
 Optional live-provider smoke coverage is gated behind explicit opt-in:
 
 ```bash

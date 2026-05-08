@@ -184,11 +184,19 @@ For offline development or tests, the codebase also supports a deterministic `mo
 
 The root README is the end-user entry point. The files under `docs/superpowers/` are design and planning artifacts for implementation work.
 
+For local test runs, install the test extras first:
+
+```bash
+python3 -m pip install -e ".[test]"
+```
+
 Run deterministic corpus regression checks:
 
 ```bash
 pytest -q tests/test_golden_corpus.py
 ```
+
+Standard `pytest` runs now include a terminal code-coverage summary for `kb_librarian`.
 
 Optional live-provider smoke run (explicit opt-in):
 
