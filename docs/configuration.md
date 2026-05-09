@@ -137,6 +137,38 @@ export ANTHROPIC_API_KEY=your_key_here
 
 If the key is missing, provider-backed commands fail with an explicit error.
 
+Anthropic routes also support opt-in Claude Code CLI delegation when you want subscription-backed access instead of `ANTHROPIC_API_KEY`:
+
+```yaml
+providers:
+  anthropic:
+    backend: vendor_cli
+    credential_source: vendor_cli
+    cli_command: claude
+    timeout_seconds: 120
+```
+
+Before using that route, sign in locally:
+
+```bash
+claude auth login
+claude auth status --json
+```
+
+For scriptable environments, you can delegate through a Claude Code OAuth token instead:
+
+```yaml
+providers:
+  anthropic:
+    backend: vendor_cli
+    credential_source: token_env
+    token_env: CLAUDE_CODE_OAUTH_TOKEN
+    cli_command: claude
+    timeout_seconds: 120
+```
+
+Generate the token with `claude setup-token`, export `CLAUDE_CODE_OAUTH_TOKEN`, and run `kb doctor` to verify the active backend and auth-source findings. KB Librarian does not parse Claude Code credential files or keychains directly.
+
 The generated config also includes an opt-in Codex-compatible provider section for cloud-backed routes through an OpenAI Responses API compatible endpoint:
 
 ```yaml
@@ -217,12 +249,14 @@ ollama pull llama3.2
 
 `kb doctor` checks local-provider reachability and reports missing routed models when local routes are configured. For Ollama it suggests `ollama pull`; for vLLM it expects the routed model to be served by the running instance; for LM Studio it expects the routed model to be loaded in the local server.
 
-Cloud providers also accept explicit future-facing seam fields:
+Cloud providers also accept explicit seam fields:
 
-- `backend`: currently `direct_http` or recognized-but-not-yet-implemented `vendor_cli`
-- `credential_source`: `api_key_env`, recognized-but-not-yet-implemented `vendor_cli`, Anthropic-only `token_env`, or `command`
+- `backend`: `direct_http`, or Anthropic `vendor_cli`
+- `credential_source`: `api_key_env`, Anthropic `vendor_cli`, Anthropic `token_env`, or future `command`
+- `cli_command`: optional executable name or path for vendor-CLI delegation; defaults to `claude` for Anthropic
+- `timeout_seconds`: optional provider timeout override for Anthropic and Codex routes
 
-Existing API-key configs remain valid when these fields are absent. If you opt into an unsupported seam, validation and `kb doctor` fail explicitly instead of silently falling back to API-key behavior.
+Existing API-key configs remain valid when these fields are absent. Anthropic `vendor_cli` is implemented in this release. Unsupported seams such as Codex `vendor_cli` or direct-http `credential_source: command` still fail explicitly instead of silently falling back to API-key behavior.
 
 `providers.retry` controls bounded retry/backoff behavior for provider-backed operations:
 

@@ -2,7 +2,9 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
-Status: Pending
+Status: Complete
+
+Completed: 2026-05-09
 
 ## Goal
 
@@ -88,3 +90,29 @@ Add an explicit Claude Code CLI delegation path for Anthropic routes so users ca
 - Direct parsing of Claude Code credential stores.
 - Direct Messages API calls using Claude subscription OAuth tokens unless Anthropic documents that as stable for third-party clients.
 - Silent fallback from failed login auth to some other credential source unless explicitly configured.
+
+## Completion Record
+
+Completed on 2026-05-09.
+
+Implemented files:
+
+- `src/kb_librarian/provider_seams.py`
+- `src/kb_librarian/providers.py`
+- `src/kb_librarian/doctor.py`
+- `src/kb_librarian/config.py`
+- `tests/test_config.py`
+- `tests/test_providers.py`
+- `tests/test_doctor.py`
+- `README.md`
+- `docs/configuration.md`
+- `docs/command-reference.md`
+- `docs/troubleshooting.md`
+- `docs/user-guide.md`
+- `docs/superpowers/plan/06-provider-backends-and-account-auth.md`
+- `docs/superpowers/plan/06c-anthropic-account-login-auth.md`
+
+Verification:
+
+- `python3 -m pytest --override-ini addopts='' tests/test_config.py tests/test_providers.py tests/test_doctor.py -q` - passed, 78 passed.
+- `python3 -m pytest --override-ini addopts='' -q` - passed, 217 passed, 3 skipped.

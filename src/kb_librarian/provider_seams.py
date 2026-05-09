@@ -36,6 +36,7 @@ class ProviderSeam:
     api_key_env: str | None = None
     token_env: str | None = None
     credential_command: str | None = None
+    cli_command: str | None = None
 
     @property
     def diagnostic_credential_source(self) -> str:
@@ -119,6 +120,11 @@ def provider_seam_supported_for_runtime(seam: ProviderSeam) -> tuple[bool, str |
     if seam.provider_name == "anthropic":
         if seam.backend == BACKEND_DIRECT_HTTP and seam.credential_source == CREDENTIAL_SOURCE_API_KEY_ENV:
             return True, None
+        if seam.backend == BACKEND_VENDOR_CLI and seam.credential_source in {
+            CREDENTIAL_SOURCE_VENDOR_CLI,
+            CREDENTIAL_SOURCE_TOKEN_ENV,
+        }:
+            return True, None
         return False, _unsupported_runtime_message(seam)
     if seam.provider_name == "codex":
         if seam.backend == BACKEND_DIRECT_HTTP and seam.credential_source == CREDENTIAL_SOURCE_API_KEY_ENV:
@@ -174,6 +180,7 @@ def _resolve_cloud_provider_seam(
 
     api_key_env = _optional_string(provider_config, "api_key_env", error_factory=error_factory, error_prefix=error_prefix)
     token_env = _optional_string(provider_config, "token_env", error_factory=error_factory, error_prefix=error_prefix)
+    cli_command = _optional_string(provider_config, "cli_command", error_factory=error_factory, error_prefix=error_prefix)
     credential_command = _optional_string(
         provider_config,
         "credential_command",
@@ -202,7 +209,11 @@ def _resolve_cloud_provider_seam(
             error_factory,
             error_prefix,
             credential_source,
-            configured_fields={"token_env": token_env, "credential_command": credential_command},
+            configured_fields={
+                "token_env": token_env,
+                "credential_command": credential_command,
+                "cli_command": cli_command,
+            },
         )
     elif credential_source == CREDENTIAL_SOURCE_VENDOR_CLI:
         _reject_conflicting_fields(
@@ -231,8 +242,15 @@ def _resolve_cloud_provider_seam(
             error_factory,
             error_prefix,
             credential_source,
-            configured_fields={"api_key_env": api_key_env, "token_env": token_env},
+            configured_fields={
+                "api_key_env": api_key_env,
+                "token_env": token_env,
+                "cli_command": cli_command,
+            },
         )
+
+    if backend != BACKEND_VENDOR_CLI and cli_command is not None:
+        raise error_factory(f"Config key {error_prefix}.cli_command is supported only with backend 'vendor_cli'.")
 
     return ProviderSeam(
         provider_name=provider_name,
@@ -241,6 +259,7 @@ def _resolve_cloud_provider_seam(
         api_key_env=api_key_env,
         token_env=token_env,
         credential_command=credential_command,
+        cli_command=cli_command,
     )
 
 
@@ -268,6 +287,7 @@ def _resolve_local_provider_seam(
         configured_fields={
             "api_key_env": _optional_string(provider_config, "api_key_env", error_factory=error_factory, error_prefix=error_prefix),
             "token_env": _optional_string(provider_config, "token_env", error_factory=error_factory, error_prefix=error_prefix),
+            "cli_command": _optional_string(provider_config, "cli_command", error_factory=error_factory, error_prefix=error_prefix),
             "credential_command": _optional_string(
                 provider_config,
                 "credential_command",
@@ -299,6 +319,7 @@ def _resolve_mock_provider_seam(
         configured_fields={
             "api_key_env": _optional_string(provider_config, "api_key_env", error_factory=error_factory, error_prefix=error_prefix),
             "token_env": _optional_string(provider_config, "token_env", error_factory=error_factory, error_prefix=error_prefix),
+            "cli_command": _optional_string(provider_config, "cli_command", error_factory=error_factory, error_prefix=error_prefix),
             "credential_command": _optional_string(
                 provider_config,
                 "credential_command",
@@ -346,6 +367,14 @@ def _reject_conflicting_fields(
 
 def _unsupported_runtime_message(seam: ProviderSeam) -> str:
     if seam.provider_name in {"anthropic", "codex"}:
+        if seam.provider_name == "anthropic":
+            return (
+                f"Provider {seam.provider_name!r} is configured for backend={seam.backend!r} and "
+                f"credential_source={seam.diagnostic_credential_source!r}, but that seam is not implemented yet. "
+                f"Supported Anthropic seams are backend={BACKEND_DIRECT_HTTP!r} with "
+                f"credential_source={CREDENTIAL_SOURCE_API_KEY_ENV!r}, or backend={BACKEND_VENDOR_CLI!r} "
+                f"with credential_source={CREDENTIAL_SOURCE_VENDOR_CLI!r} or {CREDENTIAL_SOURCE_TOKEN_ENV!r}."
+            )
         return (
             f"Provider {seam.provider_name!r} is configured for backend={seam.backend!r} and "
             f"credential_source={seam.diagnostic_credential_source!r}, but that seam is not implemented yet. "

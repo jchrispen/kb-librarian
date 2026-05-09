@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import io
+import subprocess
 from pathlib import Path
 import urllib.error
 
@@ -11,10 +12,12 @@ from kb_librarian.provider_retry import classify_provider_failure
 from kb_librarian.config import default_config
 from kb_librarian.errors import ProviderError
 from kb_librarian.providers import (
+    ClaudeCliProvider,
     CodexProvider,
     LocalOpenAICompatibleProvider,
     LocalOllamaProvider,
     MockProvider,
+    claude_cli_status,
     call_with_provider_policy,
     local_provider_status,
     operation_route,
@@ -423,8 +426,50 @@ def test_provider_from_config_requires_codex_api_key():
         )
 
 
-def test_provider_from_config_rejects_unimplemented_vendor_cli_backend():
-    with pytest.raises(ProviderError, match="backend='vendor_cli'.*not implemented yet"):
+def test_provider_from_config_builds_anthropic_vendor_cli_provider(monkeypatch):
+    monkeypatch.setattr("kb_librarian.providers.shutil.which", lambda command: f"/usr/bin/{command}")
+
+    provider = provider_from_config(
+        {
+            "providers": {
+                "anthropic": {
+                    "backend": "vendor_cli",
+                    "credential_source": "vendor_cli",
+                    "cli_command": "claude",
+                }
+            }
+        },
+        "anthropic",
+        env={},
+    )
+
+    assert isinstance(provider, ClaudeCliProvider)
+    assert provider.command_path == "/usr/bin/claude"
+
+
+def test_provider_from_config_requires_anthropic_token_env_for_vendor_cli(monkeypatch):
+    monkeypatch.setattr("kb_librarian.providers.shutil.which", lambda command: f"/usr/bin/{command}")
+
+    with pytest.raises(ProviderError, match="Missing Claude Code OAuth token"):
+        provider_from_config(
+            {
+                "providers": {
+                    "anthropic": {
+                        "backend": "vendor_cli",
+                        "credential_source": "token_env",
+                        "token_env": "CLAUDE_CODE_OAUTH_TOKEN",
+                    }
+                }
+            },
+            "anthropic",
+            env={},
+        )
+
+
+def test_provider_from_config_requires_claude_cli_binary(monkeypatch):
+    monkeypatch.setattr("kb_librarian.providers.shutil.which", lambda command: None)
+
+    with pytest.raises(ProviderError, match="Claude Code CLI command 'claude' was not found"):
         provider_from_config(
             {
                 "providers": {
@@ -516,6 +561,84 @@ def test_codex_provider_http_errors_feed_retry_classification(monkeypatch):
     classification = classify_provider_failure(exc_info.value)
     assert classification.transient is True
     assert classification.detail == "http_status=429"
+
+
+def test_claude_cli_provider_maps_structured_response(monkeypatch):
+    commands = []
+
+    def fake_run(command, **kwargs):  # noqa: ANN001
+        commands.append((command, kwargs))
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(
+                {
+                    "type": "result",
+                    "is_error": False,
+                    "result": "Done.",
+                    "structured_output": {
+                        "candidates": [
+                            {
+                                "title": "Claude CLI note",
+                                "summary": "Claude CLI delegation returns structured notes.",
+                                "knowledge_type": "technique",
+                                "body": "## Core idea\n\nUse Claude CLI delegation.\n",
+                                "retrieval_phrases": ["claude cli delegation"],
+                                "tags": ["anthropic"],
+                                "confidence": "high",
+                                "utility_score": "high",
+                            }
+                        ]
+                    },
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr("kb_librarian.providers.subprocess.run", fake_run)
+
+    provider = ClaudeCliProvider(
+        command_path="/usr/bin/claude",
+        credential_source="vendor_cli",
+        token_env=None,
+        timeout_seconds=12,
+        env={"HOME": "/tmp/test-home"},
+    )
+    result = provider.extract_candidates(
+        text="# Claude CLI\n\nUse account-backed Anthropic routing.",
+        source_path=Path("raw/claude.md"),
+        max_notes=2,
+        model="claude-haiku-4-5",
+    )
+
+    command, kwargs = commands[0]
+    assert result.candidates[0].title == "Claude CLI note"
+    assert command[:4] == ["/usr/bin/claude", "-p", "--model", "claude-haiku-4-5"]
+    assert "--json-schema" in command
+    assert kwargs["cwd"] == "/tmp/opencode"
+    assert kwargs["timeout"] == 12
+    assert kwargs["env"] == {"HOME": "/tmp/test-home"}
+
+
+def test_claude_cli_provider_surfaces_login_required_error(monkeypatch):
+    def fake_run(command, **kwargs):  # noqa: ANN001
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="Please run claude auth login to continue.",
+            stderr="",
+        )
+
+    monkeypatch.setattr("kb_librarian.providers.subprocess.run", fake_run)
+
+    provider = ClaudeCliProvider(
+        command_path="/usr/bin/claude",
+        credential_source="vendor_cli",
+        token_env=None,
+    )
+
+    with pytest.raises(ProviderError, match="requires an active login"):
+        provider.synthesize_context(task="x", selected_notes=[], model="claude-haiku-4-5")
 
 
 def test_local_ollama_provider_maps_structured_response(monkeypatch):
@@ -690,3 +813,52 @@ def test_local_provider_status_reports_openai_compatible_models(monkeypatch):
 
     assert status.reachable is True
     assert status.models == ["NousResearch/Meta-Llama-3-8B-Instruct"]
+
+
+def test_claude_cli_status_reports_authenticated(monkeypatch):
+    monkeypatch.setattr("kb_librarian.providers.shutil.which", lambda command: "/usr/bin/claude")
+
+    def fake_run(command, **kwargs):  # noqa: ANN001
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps({"loggedIn": True, "authMethod": "claude.ai"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr("kb_librarian.providers.subprocess.run", fake_run)
+
+    status = claude_cli_status("claude", env={})
+
+    assert status.available is True
+    assert status.authenticated is True
+    assert status.code == "authenticated"
+
+
+def test_claude_cli_status_reports_login_required(monkeypatch):
+    monkeypatch.setattr("kb_librarian.providers.shutil.which", lambda command: "/usr/bin/claude")
+
+    def fake_run(command, **kwargs):  # noqa: ANN001
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps({"loggedIn": False}),
+            stderr="",
+        )
+
+    monkeypatch.setattr("kb_librarian.providers.subprocess.run", fake_run)
+
+    status = claude_cli_status("claude", env={})
+
+    assert status.available is True
+    assert status.authenticated is False
+    assert status.code == "login_required"
+
+
+def test_claude_cli_status_reports_missing_command(monkeypatch):
+    monkeypatch.setattr("kb_librarian.providers.shutil.which", lambda command: None)
+
+    status = claude_cli_status("claude", env={})
+
+    assert status.available is False
+    assert status.code == "missing_command"

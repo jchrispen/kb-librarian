@@ -12,7 +12,7 @@ You need:
 
 - Python 3.11+
 - A writable KB data directory
-- `ANTHROPIC_API_KEY` if you want to use the default provider-backed ingest and context flow
+- `ANTHROPIC_API_KEY` for the default Anthropic API-key flow, or a Claude Code login/token if you reconfigure Anthropic to use `backend: vendor_cli`
 - `OPENAI_API_KEY` if you route provider-backed operations to the Codex-compatible provider
 
 Create and activate a virtual environment first:

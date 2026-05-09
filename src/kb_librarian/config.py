@@ -309,6 +309,7 @@ def validate_config(config: Mapping[str, Any]) -> None:
         error_factory=ConfigError,
         error_prefix="providers.anthropic",
     )
+    _validate_positive_number(anthropic, "providers.anthropic.timeout_seconds")
 
     codex = config["providers"].get("codex")
     if codex is not None:

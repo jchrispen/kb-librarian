@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import subprocess
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -21,9 +23,14 @@ from kb_librarian.provider_retry import (
     classify_provider_failure,
 )
 from kb_librarian.provider_seams import (
+    BACKEND_DIRECT_HTTP,
+    BACKEND_VENDOR_CLI,
     BACKEND_LM_STUDIO,
     BACKEND_OLLAMA,
     BACKEND_VLLM,
+    CREDENTIAL_SOURCE_API_KEY_ENV,
+    CREDENTIAL_SOURCE_TOKEN_ENV,
+    CREDENTIAL_SOURCE_VENDOR_CLI,
     ProviderSeam,
     provider_seam_supported_for_runtime,
     resolve_provider_seam,
@@ -36,6 +43,44 @@ T = TypeVar("T")
 
 UTILITY_SCORES = {"high", "medium", "low"}
 INTEGRATION_VERDICTS = {"identical", "adds_nuance", "contradicts", "unrelated"}
+
+CLAUDE_CLI_DEFAULT_COMMAND = "claude"
+CLAUDE_CLI_STATUS_TIMEOUT_SECONDS = 10.0
+CLAUDE_CLI_WORKDIR = Path("/tmp/opencode")
+
+_CLAUDE_CLI_UNSUPPORTED_TOKENS = (
+    "unknown option",
+    "unknown command",
+    "unexpected argument",
+    "no such option",
+    "--output-format",
+    "--json-schema",
+)
+_CLAUDE_CLI_EXPIRED_TOKENS = (
+    "expired",
+    "reauth",
+    "re-auth",
+    "refresh token",
+    "invalid grant",
+    "oauth token invalid",
+    "oauth token expired",
+)
+_CLAUDE_CLI_LOGIN_REQUIRED_TOKENS = (
+    "not logged in",
+    "login required",
+    "please run claude auth login",
+    "run claude auth login",
+    "authentication required",
+)
+
+_CLAUDE_JSON_TOOL_ARGS = [
+    "--output-format",
+    "json",
+    "--tools",
+    "",
+    "--no-session-persistence",
+    "--disable-slash-commands",
+]
 
 
 @dataclass(frozen=True)
@@ -115,6 +160,15 @@ class LocalProviderStatus:
     reachable: bool
     models: list[str]
     message: str
+
+
+@dataclass(frozen=True)
+class ClaudeCliStatus:
+    available: bool
+    authenticated: bool
+    code: str
+    message: str
+    command_path: str | None = None
 
 
 class LLMProvider(Protocol):
@@ -285,15 +339,41 @@ def provider_from_config(
         seam = _provider_seam(provider_name, provider_config)
         _ensure_runtime_support(seam)
         environ = os.environ if env is None else env
-        api_key_env = seam.api_key_env or "ANTHROPIC_API_KEY"
-        api_key = environ.get(api_key_env)
-        if not api_key:
+        if seam.backend == BACKEND_DIRECT_HTTP:
+            api_key_env = seam.api_key_env or "ANTHROPIC_API_KEY"
+            api_key = environ.get(api_key_env)
+            if not api_key:
+                raise ProviderError(
+                    f"Missing Anthropic credentials for credential_source {seam.diagnostic_credential_source!r}. "
+                    f"Set environment variable {api_key_env} "
+                    "or switch providers.anthropic.credential_source back to 'api_key_env'."
+                )
+            timeout = _provider_timeout_seconds(provider_config.get("timeout_seconds"), default=120.0)
+            return AnthropicProvider(api_key=api_key, timeout_seconds=timeout)
+
+        cli_command = seam.cli_command or CLAUDE_CLI_DEFAULT_COMMAND
+        command_path = _resolve_cli_command_path(cli_command)
+        if command_path is None:
             raise ProviderError(
-                f"Missing Anthropic credentials for credential_source {seam.diagnostic_credential_source!r}. "
-                f"Set environment variable {api_key_env} "
-                "or switch providers.anthropic.credential_source back to 'api_key_env'."
+                f"Claude Code CLI command {cli_command!r} was not found. Install Claude Code or set "
+                "providers.anthropic.cli_command to the correct executable path."
             )
-        return AnthropicProvider(api_key=api_key)
+        if seam.credential_source == CREDENTIAL_SOURCE_TOKEN_ENV:
+            token_env = seam.token_env or "CLAUDE_CODE_OAUTH_TOKEN"
+            if not environ.get(token_env):
+                raise ProviderError(
+                    "Missing Claude Code OAuth token for Anthropic CLI delegation. Set environment variable "
+                    f"{token_env} from `claude setup-token`, or switch providers.anthropic.credential_source "
+                    "back to 'api_key_env'."
+                )
+        timeout = _provider_timeout_seconds(provider_config.get("timeout_seconds"), default=120.0)
+        return ClaudeCliProvider(
+            command_path=command_path,
+            credential_source=seam.credential_source or CREDENTIAL_SOURCE_VENDOR_CLI,
+            token_env=seam.token_env,
+            timeout_seconds=timeout,
+            env=None if env is None else dict(env),
+        )
     if provider_name == "codex":
         seam = _provider_seam(provider_name, provider_config)
         _ensure_runtime_support(seam)
@@ -468,6 +548,112 @@ def _openai_compatible_local_provider_status(backend: str, base_url: str, timeou
         return LocalProviderStatus(False, [], f"{label} models response was not valid JSON.")
     models = _openai_model_names(payload)
     return LocalProviderStatus(True, models, f"{label} backend is reachable at {base_url}.")
+
+
+def claude_cli_status(
+    command: str = CLAUDE_CLI_DEFAULT_COMMAND,
+    *,
+    env: Mapping[str, str] | None = None,
+    timeout_seconds: float = CLAUDE_CLI_STATUS_TIMEOUT_SECONDS,
+) -> ClaudeCliStatus:
+    """Return machine-readable Claude Code CLI auth status for doctor checks."""
+
+    command_path = _resolve_cli_command_path(command)
+    if command_path is None:
+        return ClaudeCliStatus(
+            available=False,
+            authenticated=False,
+            code="missing_command",
+            message=(
+                f"Claude Code CLI command {command!r} was not found. Install Claude Code or set "
+                "providers.anthropic.cli_command to the correct executable path."
+            ),
+        )
+
+    try:
+        result = subprocess.run(
+            [command_path, "auth", "status", "--json"],
+            cwd=str(CLAUDE_CLI_WORKDIR),
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            env=None if env is None else dict(env),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return ClaudeCliStatus(
+            available=True,
+            authenticated=False,
+            code="status_timeout",
+            message=(
+                "Claude Code auth status timed out. Retry `claude auth status --json`, check local CLI health, "
+                "or switch providers.anthropic.credential_source back to 'api_key_env'."
+            ),
+            command_path=command_path,
+        )
+    except OSError as exc:
+        return ClaudeCliStatus(
+            available=False,
+            authenticated=False,
+            code="command_error",
+            message=f"Claude Code CLI command {command!r} could not be executed: {exc}",
+            command_path=command_path,
+        )
+
+    output = _combined_subprocess_output(result.stdout, result.stderr)
+    if result.returncode != 0:
+        code = _classify_claude_cli_auth_failure(output)
+        return ClaudeCliStatus(
+            available=True,
+            authenticated=False,
+            code=code,
+            message=_claude_cli_status_message(code, output),
+            command_path=command_path,
+        )
+
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return ClaudeCliStatus(
+            available=True,
+            authenticated=False,
+            code="unsupported_cli",
+            message=(
+                "Claude Code auth status did not return valid JSON. Update Claude Code to a version that supports "
+                "`claude auth status --json`, or switch providers.anthropic.credential_source back to 'api_key_env'."
+            ),
+            command_path=command_path,
+        )
+
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("loggedIn"), bool):
+        return ClaudeCliStatus(
+            available=True,
+            authenticated=False,
+            code="unsupported_cli",
+            message=(
+                "Claude Code auth status did not include a `loggedIn` field. Update Claude Code to a version that "
+                "supports machine-readable auth status, or switch providers.anthropic.credential_source back to "
+                "'api_key_env'."
+            ),
+            command_path=command_path,
+        )
+
+    if payload["loggedIn"]:
+        return ClaudeCliStatus(
+            available=True,
+            authenticated=True,
+            code="authenticated",
+            message="Claude Code auth status reports an active login.",
+            command_path=command_path,
+        )
+
+    return ClaudeCliStatus(
+        available=True,
+        authenticated=False,
+        code="login_required",
+        message="Claude Code auth status reports no active login. Run `claude auth login` and retry.",
+        command_path=command_path,
+    )
 
 
 def provider_runtime_support(provider_name: str, provider_config: Mapping[str, Any]) -> tuple[ProviderSeam, str | None]:
@@ -1008,8 +1194,9 @@ class LocalOllamaProvider:
 class AnthropicProvider:
     """Anthropic Messages API adapter using structured JSON prompts."""
 
-    def __init__(self, *, api_key: str) -> None:
+    def __init__(self, *, api_key: str, timeout_seconds: float = 120.0) -> None:
         self.api_key = api_key
+        self.timeout_seconds = timeout_seconds
 
     def extract_candidates(
         self,
@@ -1188,7 +1375,7 @@ class AnthropicProvider:
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=120) as response:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             try:
@@ -1202,11 +1389,253 @@ class AnthropicProvider:
             raise ProviderError(message) from exc
         except urllib.error.URLError as exc:
             raise ProviderError(f"Anthropic request failed: {exc}") from exc
+        except TimeoutError as exc:
+            raise ProviderError(
+                f"Anthropic request timed out after {self.timeout_seconds:g}s. "
+                "Increase providers.anthropic.timeout_seconds or switch the operation route."
+            ) from exc
 
         try:
             return json.loads(raw)
         except (json.JSONDecodeError, AttributeError) as exc:
             raise ProviderError("Anthropic response was not valid Messages API JSON.") from exc
+
+
+class ClaudeCliProvider:
+    """Claude Code CLI delegation adapter for Anthropic account-backed auth."""
+
+    def __init__(
+        self,
+        *,
+        command_path: str,
+        credential_source: str,
+        token_env: str | None,
+        timeout_seconds: float = 120.0,
+        env: Mapping[str, str] | None = None,
+    ) -> None:
+        self.command_path = command_path
+        self.credential_source = credential_source
+        self.token_env = token_env
+        self.timeout_seconds = timeout_seconds
+        self.env = None if env is None else dict(env)
+
+    def extract_candidates(
+        self,
+        *,
+        text: str,
+        source_path: Path,
+        max_notes: int,
+        model: str,
+    ) -> ExtractionResult:
+        prompt = (
+            "Extract durable KB Librarian candidate notes from this markdown/text document. "
+            "Return only JSON with shape {\"candidates\": [...]}. Each candidate must include "
+            "title, summary, knowledge_type, body, retrieval_phrases, tags, confidence, "
+            "utility_score, and may include topic, agent_use, applies_when, "
+            "does_not_apply_when, failure_modes, claims. Prefer zero candidates over weak notes. "
+            f"Return at most {max_notes} candidates.\n\n"
+            f"Source path: {source_path.as_posix()}\n\n{text}"
+        )
+        payload = self._claude_json(
+            model=model,
+            prompt=prompt,
+            schema=_claude_extraction_schema(),
+        )
+        result = validate_extraction_payload(payload)
+        return ExtractionResult(candidates=result.candidates[:max_notes])
+
+    def classify_candidate(
+        self,
+        *,
+        candidate: CandidateNote,
+        text: str,
+        source_path: Path,
+        model: str,
+    ) -> ClassificationResult:
+        candidate_json = json.dumps(candidate_to_payload(candidate), sort_keys=True)
+        prompt = (
+            "Classify this KB candidate. Return only JSON with keys topic, knowledge_type, "
+            "confidence, and reason. Topic should be a concise kebab-case compatible topic "
+            "name. Confidence must be high, medium, or low.\n\n"
+            f"Source path: {source_path.as_posix()}\n"
+            f"Candidate: {candidate_json}\n\n"
+            f"Document excerpt:\n{text[:6000]}"
+        )
+        payload = self._claude_json(model=model, prompt=prompt, schema=_claude_classification_schema())
+        return validate_classification_payload(payload)
+
+    def integration_verdict(
+        self,
+        *,
+        candidate: CandidateNote,
+        classification: ClassificationResult,
+        matches: list[dict[str, Any]],
+        text: str,
+        source_path: Path,
+        model: str,
+    ) -> IntegrationResult:
+        candidate_json = json.dumps(candidate_to_payload(candidate), sort_keys=True)
+        classification_json = json.dumps(
+            {
+                "topic": classification.topic,
+                "knowledge_type": classification.knowledge_type,
+                "confidence": classification.confidence,
+                "reason": classification.reason,
+            },
+            sort_keys=True,
+        )
+        matches_json = json.dumps(matches, sort_keys=True)
+        prompt = (
+            "You are integrating a candidate KB note into an existing artifact. "
+            "Return only JSON with keys verdict, target_note_ids, and rationale. "
+            "Allowed verdict values: identical, adds_nuance, contradicts, unrelated. "
+            "Choose target_note_ids from the provided matches. Return [] when verdict is unrelated.\n\n"
+            f"Source path: {source_path.as_posix()}\n"
+            f"Candidate: {candidate_json}\n"
+            f"Classification: {classification_json}\n"
+            f"Matches: {matches_json}\n\n"
+            f"Document excerpt:\n{text[:6000]}"
+        )
+        payload = self._claude_json(model=model, prompt=prompt, schema=_claude_integration_schema())
+        return validate_integration_payload(payload)
+
+    def synthesize_context(self, **kwargs: object) -> str:
+        task = str(kwargs.get("task", "")).strip()
+        mode = str(kwargs.get("mode", "coding")).strip() or "coding"
+        budget = int(kwargs.get("budget", 1800))
+        model = str(kwargs.get("model", "")).strip()
+        selected_notes = kwargs.get("selected_notes")
+        if not isinstance(selected_notes, list):
+            selected_notes = []
+
+        prompt = (
+            "Synthesize compact KB context in markdown with exactly these sections:\n"
+            "## Directly relevant techniques\n"
+            "## Applicable heuristics\n"
+            "## Warnings / failure modes\n"
+            "## Suggested agent behavior\n\n"
+            "Ground every claim in the selected notes and cite note IDs in square brackets like [2026-...]. "
+            "Do not invent facts outside selected notes.\n\n"
+            f"Task: {task}\n"
+            f"Mode: {mode}\n"
+            f"Budget tokens: {budget}\n\n"
+            f"Selected notes JSON:\n{json.dumps(selected_notes, sort_keys=True)}"
+        )
+        return self._claude_text(model=model, prompt=prompt).strip()
+
+    def synthesize_exploration(self, **kwargs: object) -> str:
+        problem = str(kwargs.get("problem", "")).strip()
+        budget = int(kwargs.get("budget", 3000))
+        model = str(kwargs.get("model", "")).strip()
+        selected_notes = kwargs.get("selected_notes")
+        if not isinstance(selected_notes, list):
+            selected_notes = []
+
+        prompt = (
+            "Synthesize broad KB exploration in markdown with exactly these sections:\n"
+            "## Directly relevant concepts\n"
+            "## Adjacent patterns\n"
+            "## Tensions / tradeoffs\n"
+            "## Possible analogies\n"
+            "## Anti-patterns to avoid\n"
+            "## Open questions\n\n"
+            "Ground every claim in the selected notes and cite note IDs in square brackets like [2026-...]. "
+            "Use adjacent concepts only when the selected notes support them. "
+            "Do not invent facts outside selected notes.\n\n"
+            f"Problem: {problem}\n"
+            f"Budget tokens: {budget}\n\n"
+            f"Selected notes JSON:\n{json.dumps(selected_notes, sort_keys=True)}"
+        )
+        return self._claude_text(model=model, prompt=prompt).strip()
+
+    def synthesize_compaction(self, **kwargs: object) -> Mapping[str, Any]:
+        model = str(kwargs.get("model", "")).strip()
+        cluster_id = str(kwargs.get("cluster_id", "")).strip()
+        source_notes = kwargs.get("source_notes")
+        if not isinstance(source_notes, list):
+            source_notes = []
+        prompt = (
+            "Draft a review-gated KB compaction proposal. Return only JSON with keys:\n"
+            "frontmatter, body, source_note_ids, dispositions, diff_summary.\n\n"
+            "frontmatter must include title, summary, topic, knowledge_type, confidence, "
+            "retrieval_phrases, and tags. Do not include an id; the reviewer will assign one later. "
+            "body must be markdown for the proposed canonical note and cite source note IDs in square brackets. "
+            "dispositions must be a list of objects with note_id, recommendation, and rationale; "
+            "recommendation should be one of supersede, delete, keep, or review. "
+            "diff_summary must explain the user-visible change in plain language. "
+            "Do not apply changes to notes.\n\n"
+            f"Cluster ID: {cluster_id}\n"
+            f"Source notes JSON:\n{json.dumps(source_notes, sort_keys=True)}"
+        )
+        payload = self._claude_json(model=model, prompt=prompt, schema=_claude_compaction_schema())
+        if not isinstance(payload, Mapping):
+            raise ProviderError("Compaction response must be a JSON object.")
+        return payload
+
+    def _claude_json(self, *, model: str, prompt: str, schema: Mapping[str, Any]) -> Any:
+        envelope = self._claude_envelope(model=model, prompt=prompt, schema=schema)
+        structured = envelope.get("structured_output")
+        if structured is not None:
+            return structured
+        result = envelope.get("result")
+        if isinstance(result, str) and result.strip():
+            return parse_json_response(result)
+        raise ProviderError("Claude Code CLI response did not include structured JSON output.")
+
+    def _claude_text(self, *, model: str, prompt: str) -> str:
+        envelope = self._claude_envelope(model=model, prompt=prompt, schema=None)
+        result = envelope.get("result")
+        if not isinstance(result, str) or not result.strip():
+            raise ProviderError("Claude Code CLI response did not contain text content.")
+        return result
+
+    def _claude_envelope(self, *, model: str, prompt: str, schema: Mapping[str, Any] | None) -> Mapping[str, Any]:
+        if not model:
+            raise ProviderError("Anthropic provider operation requires a model.")
+
+        command = [self.command_path, "-p", "--model", model, *_CLAUDE_JSON_TOOL_ARGS]
+        if schema is not None:
+            command.extend(["--json-schema", json.dumps(schema, sort_keys=True)])
+        command.append(prompt)
+        try:
+            result = subprocess.run(
+                command,
+                cwd=str(CLAUDE_CLI_WORKDIR),
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_seconds,
+                env=self.env,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ProviderError(
+                f"Claude Code CLI delegation timed out after {self.timeout_seconds:g}s. "
+                "Increase providers.anthropic.timeout_seconds or switch the operation route."
+            ) from exc
+        except OSError as exc:
+            raise ProviderError(f"Claude Code CLI delegation failed to start: {exc}") from exc
+
+        output = _combined_subprocess_output(result.stdout, result.stderr)
+        if result.returncode != 0:
+            raise ProviderError(_claude_cli_provider_error_message(output, self.credential_source, self.token_env))
+        try:
+            envelope = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise ProviderError(
+                "Claude Code CLI response was not valid JSON. Update Claude Code or switch "
+                "providers.anthropic.credential_source back to 'api_key_env'."
+            ) from exc
+        if not isinstance(envelope, Mapping):
+            raise ProviderError("Claude Code CLI response was not a JSON object.")
+        if envelope.get("is_error") is True:
+            raise ProviderError(
+                _claude_cli_provider_error_message(
+                    _combined_subprocess_output(str(envelope.get("result", "")), result.stderr),
+                    self.credential_source,
+                    self.token_env,
+                )
+            )
+        return envelope
 
 
 class CodexProvider(AnthropicProvider):
@@ -1667,6 +2096,218 @@ def _provider_timeout_seconds(value: Any, *, default: float) -> float:
     if isinstance(value, (int, float)) and float(value) > 0:
         return float(value)
     return default
+
+
+def _resolve_cli_command_path(command: str) -> str | None:
+    resolved = shutil.which(command)
+    if resolved:
+        return resolved
+    return None
+
+
+def _combined_subprocess_output(stdout: str | None, stderr: str | None) -> str:
+    parts = [text.strip() for text in (stdout, stderr) if isinstance(text, str) and text.strip()]
+    return "\n".join(parts)
+
+
+def _classify_claude_cli_auth_failure(output: str) -> str:
+    lowered = output.lower()
+    if any(token in lowered for token in _CLAUDE_CLI_EXPIRED_TOKENS):
+        return "expired"
+    if any(token in lowered for token in _CLAUDE_CLI_LOGIN_REQUIRED_TOKENS):
+        return "login_required"
+    if any(token in lowered for token in _CLAUDE_CLI_UNSUPPORTED_TOKENS):
+        return "unsupported_cli"
+    return "auth_check_failed"
+
+
+def _claude_cli_status_message(code: str, output: str) -> str:
+    excerpt = _output_excerpt(output)
+    if code == "expired":
+        message = "Claude Code login appears expired. Run `claude auth login` again and retry."
+    elif code == "login_required":
+        message = "Claude Code login is missing. Run `claude auth login` and retry."
+    elif code == "unsupported_cli":
+        message = (
+            "Installed Claude Code CLI does not support the required auth status interface. Update Claude Code or "
+            "switch providers.anthropic.credential_source back to 'api_key_env'."
+        )
+    else:
+        message = (
+            "Claude Code auth status failed. Retry `claude auth status --json`, check the local CLI installation, "
+            "or switch providers.anthropic.credential_source back to 'api_key_env'."
+        )
+    if excerpt:
+        message += f" Output: {excerpt}"
+    return message
+
+
+def _claude_cli_provider_error_message(output: str, credential_source: str, token_env: str | None) -> str:
+    code = _classify_claude_cli_auth_failure(output)
+    excerpt = _output_excerpt(output)
+    if code == "expired":
+        if credential_source == CREDENTIAL_SOURCE_TOKEN_ENV:
+            message = (
+                "Claude Code OAuth token appears expired. Regenerate it with `claude setup-token`, export "
+                f"{token_env or 'CLAUDE_CODE_OAUTH_TOKEN'}, or switch providers.anthropic.credential_source back "
+                "to 'api_key_env'."
+            )
+        else:
+            message = (
+                "Claude Code login appears expired. Run `claude auth login` again, or switch "
+                "providers.anthropic.credential_source back to 'api_key_env'."
+            )
+    elif code == "login_required":
+        if credential_source == CREDENTIAL_SOURCE_TOKEN_ENV:
+            message = (
+                "Claude Code CLI delegation requires a valid OAuth token. Generate one with `claude setup-token`, "
+                f"export {token_env or 'CLAUDE_CODE_OAUTH_TOKEN'}, or switch providers.anthropic.credential_source "
+                "back to 'api_key_env'."
+            )
+        else:
+            message = (
+                "Claude Code CLI delegation requires an active login. Run `claude auth login`, or switch "
+                "providers.anthropic.credential_source back to 'api_key_env'."
+            )
+    elif code == "unsupported_cli":
+        message = (
+            "Installed Claude Code CLI does not support the required non-interactive flags (`-p`, "
+            "`--output-format json`, `--json-schema`). Update Claude Code or switch "
+            "providers.anthropic.credential_source back to 'api_key_env'."
+        )
+    else:
+        message = (
+            "Claude Code CLI delegation failed. Check `claude -p`, confirm the configured model is available to "
+            "your subscription, and inspect local CLI auth with `claude auth status --json`."
+        )
+    if excerpt:
+        message += f" Output: {excerpt}"
+    return message
+
+
+def _output_excerpt(output: str) -> str:
+    return output.strip().replace("\n", " ")[:240]
+
+
+def _claude_candidate_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "summary": {"type": "string"},
+            "knowledge_type": {"type": ["string", "null"]},
+            "topic": {"type": ["string", "null"]},
+            "body": {"type": "string"},
+            "retrieval_phrases": {"type": "array", "items": {"type": "string"}},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "confidence": {"type": "string"},
+            "utility_score": {"type": "string"},
+            "agent_use": {"type": "array", "items": {"type": "string"}},
+            "applies_when": {"type": "array", "items": {"type": "string"}},
+            "does_not_apply_when": {"type": "array", "items": {"type": "string"}},
+            "failure_modes": {"type": "array", "items": {"type": "string"}},
+            "claims": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": [
+            "title",
+            "summary",
+            "body",
+            "retrieval_phrases",
+            "tags",
+            "confidence",
+            "utility_score",
+        ],
+        "additionalProperties": False,
+    }
+
+
+def _claude_extraction_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "candidates": {
+                "type": "array",
+                "items": _claude_candidate_schema(),
+            }
+        },
+        "required": ["candidates"],
+        "additionalProperties": False,
+    }
+
+
+def _claude_classification_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "topic": {"type": "string"},
+            "knowledge_type": {"type": "string"},
+            "confidence": {"type": "string"},
+            "reason": {"type": "string"},
+        },
+        "required": ["topic", "knowledge_type", "confidence", "reason"],
+        "additionalProperties": False,
+    }
+
+
+def _claude_integration_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "verdict": {"type": "string"},
+            "target_note_ids": {"type": "array", "items": {"type": "string"}},
+            "rationale": {"type": "string"},
+        },
+        "required": ["verdict", "target_note_ids", "rationale"],
+        "additionalProperties": False,
+    }
+
+
+def _claude_compaction_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "frontmatter": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "topic": {"type": "string"},
+                    "knowledge_type": {"type": "string"},
+                    "confidence": {"type": "string"},
+                    "retrieval_phrases": {"type": "array", "items": {"type": "string"}},
+                    "tags": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": [
+                    "title",
+                    "summary",
+                    "topic",
+                    "knowledge_type",
+                    "confidence",
+                    "retrieval_phrases",
+                    "tags",
+                ],
+                "additionalProperties": True,
+            },
+            "body": {"type": "string"},
+            "source_note_ids": {"type": "array", "items": {"type": "string"}},
+            "dispositions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "note_id": {"type": "string"},
+                        "recommendation": {"type": "string"},
+                        "rationale": {"type": "string"},
+                    },
+                    "required": ["note_id", "recommendation", "rationale"],
+                    "additionalProperties": False,
+                },
+            },
+            "diff_summary": {"type": "string"},
+        },
+        "required": ["frontmatter", "body", "source_note_ids", "dispositions", "diff_summary"],
+        "additionalProperties": False,
+    }
 
 
 def _join_url(base_url: str, path: str) -> str:

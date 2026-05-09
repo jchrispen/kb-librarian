@@ -7,7 +7,7 @@ from kb_librarian.doctor import render_doctor_report, render_self_test_report, r
 from kb_librarian.indexing import reindex_data_dir
 from kb_librarian.init import initialize_data_dir
 from kb_librarian.notes import Note, write_note
-from kb_librarian.providers import LocalProviderStatus
+from kb_librarian.providers import ClaudeCliStatus, LocalProviderStatus
 from kb_librarian.storage import canonical_note_path
 
 
@@ -302,7 +302,7 @@ def test_doctor_reports_codex_credentials_when_routed(tmp_path):
     assert "backend=direct_http credential_source=api_key_env" in rendered
 
 
-def test_doctor_reports_unimplemented_vendor_cli_runtime(tmp_path):
+def test_doctor_reports_anthropic_vendor_cli_login_status(tmp_path, monkeypatch):
     initialize_data_dir(tmp_path)
     config = default_config(tmp_path)
     config["providers"]["anthropic"] = {
@@ -311,13 +311,42 @@ def test_doctor_reports_unimplemented_vendor_cli_runtime(tmp_path):
     }
     write_config_file(tmp_path / ".kb" / "config.yaml", config)
 
+    monkeypatch.setattr(
+        "kb_librarian.doctor.claude_cli_status",
+        lambda *args, **kwargs: ClaudeCliStatus(
+            available=True,
+            authenticated=False,
+            code="login_required",
+            message="Claude Code login is missing. Run `claude auth login` and retry.",
+            command_path="/usr/bin/claude",
+        ),
+    )
+
     report = run_doctor(tmp_path, env={})
     rendered = render_doctor_report(report)
 
-    assert report.error_count == 1
+    assert report.error_count == 0
     assert "provider-seam" in rendered
-    assert "provider-runtime-unsupported" in rendered
+    assert "anthropic-cli-login_required" in rendered
     assert "backend=vendor_cli credential_source=vendor_cli" in rendered
+
+
+def test_doctor_reports_anthropic_vendor_cli_token_env_warning(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    config["providers"]["anthropic"] = {
+        "backend": "vendor_cli",
+        "credential_source": "token_env",
+        "token_env": "CLAUDE_CODE_OAUTH_TOKEN",
+    }
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 0
+    assert "anthropic-cli-token-unset" in rendered
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in rendered
 
 
 def test_doctor_warns_when_privacy_blocks_cloud_routes(tmp_path):

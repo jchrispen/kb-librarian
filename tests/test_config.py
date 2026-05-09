@@ -251,6 +251,7 @@ def test_validate_config_accepts_vendor_cli_seams_without_breaking_defaults(tmp_
     config["providers"]["anthropic"] = {
         "backend": "vendor_cli",
         "credential_source": "vendor_cli",
+        "cli_command": "claude",
     }
 
     validate_config(config)
@@ -262,9 +263,26 @@ def test_validate_config_accepts_anthropic_token_env_vendor_cli_seam(tmp_path):
         "backend": "vendor_cli",
         "credential_source": "token_env",
         "token_env": "CLAUDE_CODE_OAUTH_TOKEN",
+        "cli_command": "/usr/local/bin/claude",
     }
 
     validate_config(config)
+
+
+def test_validate_config_rejects_cli_command_outside_vendor_cli(tmp_path):
+    config = default_config(tmp_path)
+    config["providers"]["anthropic"]["cli_command"] = "claude"
+
+    with pytest.raises(ConfigError, match="providers.anthropic.cli_command"):
+        validate_config(config)
+
+
+def test_validate_config_rejects_invalid_anthropic_timeout(tmp_path):
+    config = default_config(tmp_path)
+    config["providers"]["anthropic"]["timeout_seconds"] = 0
+
+    with pytest.raises(ConfigError, match="providers.anthropic.timeout_seconds"):
+        validate_config(config)
 
 
 def test_validate_config_rejects_malformed_codex_provider(tmp_path):

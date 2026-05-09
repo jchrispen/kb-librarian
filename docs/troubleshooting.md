@@ -1,6 +1,6 @@
 # Troubleshooting
 
-## `kb ingest` or `kb context` fails with an API key error
+## `kb ingest` or `kb context` fails with an Anthropic credential error
 
 The default config uses Anthropic provider routes.
 
@@ -9,6 +9,11 @@ Set the configured environment variable before running provider-backed commands:
 ```bash
 export ANTHROPIC_API_KEY=your_key_here
 ```
+
+If you prefer Claude subscription auth instead of `ANTHROPIC_API_KEY`, switch `providers.anthropic` to `backend: vendor_cli` and either:
+
+- run `claude auth login`, or
+- generate `CLAUDE_CODE_OAUTH_TOKEN` with `claude setup-token` and export it before running KB commands
 
 If you want local LLM behavior without cloud credentials, route provider-backed operations to the configured local provider:
 
@@ -28,6 +33,20 @@ ollama pull llama3.2
 ```
 
 For deterministic offline development or tests, reconfigure the provider manually to use the codebase's `mock` provider.
+
+## Anthropic vendor CLI routes fail
+
+Anthropic vendor CLI delegation uses the installed `claude` CLI in non-interactive print mode.
+
+Check these in order:
+
+1. Confirm the configured Claude CLI command exists, usually `claude`
+2. If you use `credential_source: vendor_cli`, run `claude auth login`
+3. If you use `credential_source: token_env`, generate a token with `claude setup-token` and export `CLAUDE_CODE_OAUTH_TOKEN`
+4. Run `claude auth status --json` to confirm the local Claude Code login is active when using `credential_source: vendor_cli`
+5. Run `kb doctor --data-dir <path>` and inspect the Providers section for missing CLI, login, or token findings
+6. Increase `providers.anthropic.timeout_seconds` if the delegated CLI call times out
+7. Switch `providers.anthropic.credential_source` back to `api_key_env` if Claude Code auth is unavailable
 
 ## Provider fallback does not run
 

@@ -27,7 +27,7 @@ from kb_librarian.notes import read_note
 from kb_librarian.paths import DIRECTORIES, LOG_FILES, REVIEW_STATE_FILE, ROOT_FILES, config_path
 from kb_librarian.privacy import is_cloud_provider
 from kb_librarian.provider_seams import BACKEND_LM_STUDIO, BACKEND_OLLAMA, BACKEND_VLLM
-from kb_librarian.providers import local_provider_status, operation_routes, provider_runtime_support
+from kb_librarian.providers import claude_cli_status, local_provider_status, operation_routes, provider_runtime_support
 from kb_librarian.retrieval import embedding_seam_status
 from kb_librarian.review import STATE_VERSION, ReviewStateError, validate_review_item
 from kb_librarian.search_index import load_backend, query_candidates
@@ -816,16 +816,52 @@ def _check_provider_routes(
             )
             continue
         if provider_name == "anthropic":
-            api_key_env = seam.api_key_env or "ANTHROPIC_API_KEY"
-            if not env.get(api_key_env):
-                findings.append(
-                    DoctorFinding(
-                        "Providers",
-                        "warn",
-                        "provider-api-key-unset",
-                        f"Environment variable {api_key_env} is not set for backend={seam.backend} credential_source={seam.diagnostic_credential_source}.",
+            if seam.backend == "direct_http":
+                api_key_env = seam.api_key_env or "ANTHROPIC_API_KEY"
+                if not env.get(api_key_env):
+                    findings.append(
+                        DoctorFinding(
+                            "Providers",
+                            "warn",
+                            "provider-api-key-unset",
+                            f"Environment variable {api_key_env} is not set for backend={seam.backend} credential_source={seam.diagnostic_credential_source}.",
+                        )
                     )
-                )
+            elif seam.backend == "vendor_cli":
+                command = seam.cli_command or "claude"
+                if seam.credential_source == "token_env":
+                    token_env = seam.token_env or "CLAUDE_CODE_OAUTH_TOKEN"
+                    if not env.get(token_env):
+                        findings.append(
+                            DoctorFinding(
+                                "Providers",
+                                "warn",
+                                "anthropic-cli-token-unset",
+                                f"Environment variable {token_env} is not set for backend={seam.backend} credential_source={seam.diagnostic_credential_source}.",
+                            )
+                        )
+                    else:
+                        findings.append(
+                            DoctorFinding(
+                                "Providers",
+                                "ok",
+                                "anthropic-cli-token-present",
+                                f"Anthropic vendor CLI token environment variable {token_env} is set for backend={seam.backend}.",
+                            )
+                        )
+                else:
+                    status = claude_cli_status(command, env=env)
+                    severity = "ok" if status.authenticated else "warn"
+                    if not status.available and status.code in {"missing_command", "command_error"}:
+                        severity = "error"
+                    findings.append(
+                        DoctorFinding(
+                            "Providers",
+                            severity,
+                            f"anthropic-cli-{status.code}",
+                            status.message,
+                        )
+                    )
         elif provider_name == "codex":
             api_key_env = seam.api_key_env or "OPENAI_API_KEY"
             if not env.get(api_key_env):
