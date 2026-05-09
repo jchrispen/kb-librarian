@@ -13,8 +13,8 @@ Phase 6 assumes Phases 1-5 are complete.
 | Milestone | Status | Notes |
 |---|---|---|
 | [06a - Provider Backend and Credential Source Seams](06a-provider-backend-and-credential-source-seams.md) | Complete | Added explicit backend/credential-source seams, preserved legacy API-key configs, and extended doctor/test coverage. |
-| [06b - Additional Local Provider Backends](06b-additional-local-provider-backends.md) | Next | Adds first-class non-Ollama local backends, prioritizing vLLM and LM Studio. |
-| [06c - Anthropic Account-Login Auth](06c-anthropic-account-login-auth.md) | Pending | Adds opt-in Claude Code CLI delegation for Anthropic subscription auth without requiring `ANTHROPIC_API_KEY`. |
+| [06b - Additional Local Provider Backends](06b-additional-local-provider-backends.md) | Complete | Added explicit `vllm` and `lm_studio` local backends, shared OpenAI-compatible local transport, and backend-specific doctor guidance. |
+| [06c - Anthropic Account-Login Auth](06c-anthropic-account-login-auth.md) | Next | Adds opt-in Claude Code CLI delegation for Anthropic subscription auth without requiring `ANTHROPIC_API_KEY`. |
 | [06d - Codex Account-Login Auth](06d-codex-account-login-auth.md) | Pending | Adds opt-in Codex CLI delegation for ChatGPT account auth without requiring `OPENAI_API_KEY`. |
 | [06e - Auth Policy, Doctor, and Security Polish](06e-auth-policy-doctor-and-security-polish.md) | Pending | Hardens precedence, diagnostics, masking, and user-facing auth guidance across all provider types. |
 

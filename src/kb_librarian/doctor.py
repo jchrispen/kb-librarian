@@ -26,6 +26,7 @@ from kb_librarian.init import initialize_data_dir
 from kb_librarian.notes import read_note
 from kb_librarian.paths import DIRECTORIES, LOG_FILES, REVIEW_STATE_FILE, ROOT_FILES, config_path
 from kb_librarian.privacy import is_cloud_provider
+from kb_librarian.provider_seams import BACKEND_LM_STUDIO, BACKEND_OLLAMA, BACKEND_VLLM
 from kb_librarian.providers import local_provider_status, operation_routes, provider_runtime_support
 from kb_librarian.retrieval import embedding_seam_status
 from kb_librarian.review import STATE_VERSION, ReviewStateError, validate_review_item
@@ -853,7 +854,7 @@ def _check_provider_routes(
                         "Providers",
                         "error",
                         "local-provider-unreachable",
-                        f"{status.message} Start Ollama, check providers.local.base_url, or switch local operation routes.",
+                        f"{status.message} {_local_provider_unreachable_hint(seam.backend)}",
                     )
                 )
                 continue
@@ -862,15 +863,21 @@ def _check_provider_routes(
                 for model in local_route_models
                 if model not in status.models and f"{model}:latest" not in status.models
             ]
-            if missing_models and status.models:
+            if missing_models:
+                backend_name = _local_backend_name(seam.backend)
+                if status.models:
+                    detail = f"listed by {backend_name}: " + ", ".join(missing_models)
+                else:
+                    detail = f"reported no available models for routed model(s): " + ", ".join(missing_models)
                 findings.append(
                     DoctorFinding(
                         "Providers",
                         "warn",
                         "local-provider-model-missing",
-                        "Local provider is reachable, but routed model(s) were not listed by Ollama: "
-                        + ", ".join(missing_models)
-                        + ". Run `ollama pull <model>` or update operation routes.",
+                        "Local provider is reachable, but routed model(s) were not "
+                        + detail
+                        + ". "
+                        + _local_provider_missing_model_hint(seam.backend),
                     )
                 )
             else:
@@ -927,6 +934,36 @@ def _check_parser_dependencies(findings: list[DoctorFinding]) -> None:
         return
     findings.append(DoctorFinding("Parsers", "ok", "pdf-parser", "PDF parser dependency is available."))
     findings.append(DoctorFinding("Parsers", "ok", "html-parser", "HTML parser uses the Python standard library."))
+
+
+def _local_provider_unreachable_hint(backend: str) -> str:
+    if backend == BACKEND_OLLAMA:
+        return "Start Ollama, check providers.local.base_url, or switch local operation routes."
+    if backend == BACKEND_VLLM:
+        return "Start the vLLM server, check providers.local.base_url, or switch local operation routes."
+    if backend == BACKEND_LM_STUDIO:
+        return "Start the LM Studio local server, check providers.local.base_url, or switch local operation routes."
+    return "Check providers.local.base_url or switch local operation routes."
+
+
+def _local_provider_missing_model_hint(backend: str) -> str:
+    if backend == BACKEND_OLLAMA:
+        return "Run `ollama pull <model>` or update operation routes."
+    if backend == BACKEND_VLLM:
+        return "Start vLLM with the routed model or update operation routes."
+    if backend == BACKEND_LM_STUDIO:
+        return "Load the routed model in LM Studio or update operation routes."
+    return "Update operation routes."
+
+
+def _local_backend_name(backend: str) -> str:
+    if backend == BACKEND_OLLAMA:
+        return "Ollama"
+    if backend == BACKEND_VLLM:
+        return "vLLM"
+    if backend == BACKEND_LM_STUDIO:
+        return "LM Studio"
+    return backend
 
 
 def _check_auto_commit_config(

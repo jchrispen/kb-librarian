@@ -2,7 +2,7 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
-Status: Pending
+Status: Complete
 
 ## Goal
 
@@ -76,3 +76,25 @@ Expand local-first execution beyond Ollama by adding first-class support for add
 
 - Browser-managed auth for local servers.
 - Automatic selection among multiple running local backends.
+
+## Completion Record
+
+Completed on 2026-05-08.
+
+Implemented files:
+
+- `src/kb_librarian/provider_seams.py`
+- `src/kb_librarian/providers.py`
+- `src/kb_librarian/doctor.py`
+- `tests/test_config.py`
+- `tests/test_providers.py`
+- `tests/test_doctor.py`
+- `README.md`
+- `docs/configuration.md`
+- `docs/troubleshooting.md`
+- `docs/superpowers/plan/06-provider-backends-and-account-auth.md`
+- `docs/superpowers/plan/06b-additional-local-provider-backends.md`
+
+Verification:
+
+- `python3 -m pytest --override-ini addopts='' tests/test_config.py tests/test_providers.py tests/test_doctor.py -q` - passed, 68 passed.

@@ -10,6 +10,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Protocol, TypeVar
+from urllib.parse import urlparse, urlunparse
 
 from kb_librarian.errors import ProviderError
 from kb_librarian.notes import CONFIDENCE_LEVELS, KNOWLEDGE_TYPES
@@ -19,7 +20,14 @@ from kb_librarian.provider_retry import (
     call_with_retry,
     classify_provider_failure,
 )
-from kb_librarian.provider_seams import BACKEND_OLLAMA, ProviderSeam, provider_seam_supported_for_runtime, resolve_provider_seam
+from kb_librarian.provider_seams import (
+    BACKEND_LM_STUDIO,
+    BACKEND_OLLAMA,
+    BACKEND_VLLM,
+    ProviderSeam,
+    provider_seam_supported_for_runtime,
+    resolve_provider_seam,
+)
 from kb_librarian.privacy import enforce_provider_privacy
 from kb_librarian.storage import normalize_topic_for_path
 
@@ -322,7 +330,13 @@ def provider_from_config(
         if not isinstance(base_url, str) or not base_url.strip():
             raise ProviderError("Config key providers.local.base_url is required.")
         timeout = _provider_timeout_seconds(provider_config.get("timeout_seconds"), default=120.0)
-        return LocalOllamaProvider(base_url=base_url, timeout_seconds=timeout)
+        if seam.backend == BACKEND_OLLAMA:
+            return LocalOllamaProvider(base_url=base_url, timeout_seconds=timeout)
+        return LocalOpenAICompatibleProvider(
+            backend=seam.backend,
+            base_url=base_url,
+            timeout_seconds=timeout,
+        )
 
     raise ProviderError(f"Unsupported provider {provider_name!r}.")
 
@@ -390,7 +404,7 @@ def local_provider_status(
     *,
     timeout_seconds: float | None = None,
 ) -> LocalProviderStatus:
-    """Return Ollama backend reachability and model names for diagnostics."""
+    """Return local backend reachability and model names for diagnostics."""
 
     try:
         seam = resolve_provider_seam(
@@ -401,14 +415,20 @@ def local_provider_status(
         )
     except ProviderError as exc:
         return LocalProviderStatus(False, [], f"Local provider configuration error: {exc}")
-    if seam.backend != BACKEND_OLLAMA:
-        return LocalProviderStatus(False, [], "Only the 'ollama' local backend is supported.")
     base_url = provider_config.get("base_url")
     if not isinstance(base_url, str) or not base_url.strip():
         return LocalProviderStatus(False, [], "Local provider base_url is not configured.")
     timeout = timeout_seconds
     if timeout is None:
         timeout = _provider_timeout_seconds(provider_config.get("timeout_seconds"), default=5.0)
+    if seam.backend == BACKEND_OLLAMA:
+        return _ollama_local_provider_status(base_url, timeout)
+    if seam.backend in {BACKEND_VLLM, BACKEND_LM_STUDIO}:
+        return _openai_compatible_local_provider_status(seam.backend, base_url, timeout)
+    return LocalProviderStatus(False, [], f"Unsupported local backend {seam.backend!r}.")
+
+
+def _ollama_local_provider_status(base_url: str, timeout: float) -> LocalProviderStatus:
     url = _join_url(base_url, "/api/tags")
     request = urllib.request.Request(url, method="GET")
     try:
@@ -427,6 +447,27 @@ def local_provider_status(
         return LocalProviderStatus(False, [], "Ollama tags response was not valid JSON.")
     models = _ollama_model_names(payload)
     return LocalProviderStatus(True, models, f"Ollama backend is reachable at {base_url}.")
+
+
+def _openai_compatible_local_provider_status(backend: str, base_url: str, timeout: float) -> LocalProviderStatus:
+    label = _local_backend_label(backend)
+    request = urllib.request.Request(_openai_compatible_url(base_url, "/models"), method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        return LocalProviderStatus(False, [], f"{label} models request failed with HTTP {exc.code}.")
+    except urllib.error.URLError as exc:
+        return LocalProviderStatus(False, [], f"{label} backend is unreachable at {base_url}: {exc.reason}.")
+    except TimeoutError:
+        return LocalProviderStatus(False, [], f"{label} backend timed out at {base_url}.")
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return LocalProviderStatus(False, [], f"{label} models response was not valid JSON.")
+    models = _openai_model_names(payload)
+    return LocalProviderStatus(True, models, f"{label} backend is reachable at {base_url}.")
 
 
 def provider_runtime_support(provider_name: str, provider_config: Mapping[str, Any]) -> tuple[ProviderSeam, str | None]:
@@ -1251,6 +1292,62 @@ class CodexProvider(AnthropicProvider):
         return payload
 
 
+class LocalOpenAICompatibleProvider(CodexProvider):
+    """OpenAI-compatible local adapter for vLLM and LM Studio."""
+
+    def __init__(self, *, backend: str, base_url: str, timeout_seconds: float = 120.0) -> None:
+        self.backend = backend
+        self.base_url = base_url.rstrip("/")
+        self.timeout_seconds = timeout_seconds
+        self.organization = None
+        self.project = None
+
+    def _responses_envelope(self, *, model: str, prompt: str, json_format: bool) -> Any:
+        if not model:
+            raise ProviderError("Local provider operation requires a model.")
+        body: dict[str, Any] = {
+            "model": model,
+            "input": [
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": prompt}],
+                }
+            ],
+            "max_output_tokens": 4096,
+        }
+        if json_format:
+            body["text"] = {"format": {"type": "json_object"}}
+        request = urllib.request.Request(
+            _openai_compatible_url(self.base_url, "/responses"),
+            data=json.dumps(body).encode("utf-8"),
+            method="POST",
+            headers={"content-type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                raw = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            raise _local_openai_compatible_http_error(self.backend, exc) from exc
+        except urllib.error.URLError as exc:
+            raise ProviderError(_local_openai_compatible_transport_message(self.backend, exc, self.base_url, model)) from exc
+        except TimeoutError as exc:
+            raise ProviderError(_local_openai_compatible_timeout_message(self.backend, self.timeout_seconds)) from exc
+
+        try:
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, AttributeError) as exc:
+            raise ProviderError(f"{_local_backend_label(self.backend)} response was not valid Responses API JSON.") from exc
+        if not isinstance(payload, Mapping):
+            raise ProviderError(f"{_local_backend_label(self.backend)} response was not a JSON object.")
+        response_error = payload.get("error")
+        if response_error:
+            raise ProviderError(
+                f"{_local_backend_label(self.backend)} response returned an error: "
+                f"{_provider_error_text(response_error)}"
+            )
+        return payload
+
+
 def _envelope_text(envelope: Any) -> str:
     if not isinstance(envelope, Mapping):
         raise ProviderError("Anthropic response was not a JSON object.")
@@ -1576,6 +1673,18 @@ def _join_url(base_url: str, path: str) -> str:
     return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
 
 
+def _openai_compatible_url(base_url: str, path: str) -> str:
+    parsed = urlparse(base_url.rstrip("/"))
+    base_path = parsed.path.rstrip("/")
+    if base_path.endswith("/v1"):
+        full_path = f"{base_path}/{path.lstrip('/')}"
+    elif base_path:
+        full_path = f"{base_path}/v1/{path.lstrip('/')}"
+    else:
+        full_path = f"/v1/{path.lstrip('/')}"
+    return urlunparse(parsed._replace(path=full_path, params="", query="", fragment=""))
+
+
 def _ollama_model_names(payload: Any) -> list[str]:
     if not isinstance(payload, Mapping):
         return []
@@ -1592,6 +1701,72 @@ def _ollama_model_names(payload: Any) -> list[str]:
             if isinstance(value, str) and value.strip() and value.strip() not in names:
                 names.append(value.strip())
     return sorted(names)
+
+
+def _openai_model_names(payload: Any) -> list[str]:
+    if not isinstance(payload, Mapping):
+        return []
+    data = payload.get("data")
+    if not isinstance(data, list):
+        return []
+    names: list[str] = []
+    for item in data:
+        if not isinstance(item, Mapping):
+            continue
+        model_id = item.get("id")
+        if isinstance(model_id, str) and model_id.strip() and model_id.strip() not in names:
+            names.append(model_id.strip())
+    return sorted(names)
+
+
+def _local_backend_label(backend: str) -> str:
+    return {
+        BACKEND_OLLAMA: "Ollama",
+        BACKEND_VLLM: "vLLM",
+        BACKEND_LM_STUDIO: "LM Studio",
+    }.get(backend, backend)
+
+
+def _local_openai_compatible_http_error(backend: str, exc: urllib.error.HTTPError) -> ProviderError:
+    try:
+        response_body = exc.read().decode("utf-8")
+    except Exception:
+        response_body = ""
+    label = _local_backend_label(backend)
+    body_excerpt = _provider_error_text(response_body).strip().replace("\n", " ")[:240]
+    message = f"Local {label} request failed with HTTP {exc.code}"
+    if body_excerpt:
+        message += f": {body_excerpt}"
+    if backend == BACKEND_LM_STUDIO:
+        message += ". Load the configured model in LM Studio, confirm the local server is running, or switch the operation route."
+    elif backend == BACKEND_VLLM:
+        message += ". Start vLLM with the configured model and an OpenAI-compatible /v1 endpoint, or switch the operation route."
+    else:
+        message += ". Check the configured local backend and operation route."
+    return ProviderError(message)
+
+
+def _local_openai_compatible_transport_message(backend: str, exc: urllib.error.URLError, base_url: str, model: str) -> str:
+    label = _local_backend_label(backend)
+    if backend == BACKEND_LM_STUDIO:
+        return (
+            f"Local {label} request failed: {exc}. Start the LM Studio local server at {base_url}, "
+            f"load model {model!r}, or switch the operation route."
+        )
+    if backend == BACKEND_VLLM:
+        return (
+            f"Local {label} request failed: {exc}. Start vLLM at {base_url} with model {model!r}, "
+            "or switch the operation route."
+        )
+    return f"Local {label} request failed: {exc}."
+
+
+def _local_openai_compatible_timeout_message(backend: str, timeout_seconds: float) -> str:
+    label = _local_backend_label(backend)
+    return (
+        f"Local {label} request timed out after {timeout_seconds:g}s. "
+        "Increase providers.local.timeout_seconds or switch the operation route."
+    )
 
 
 def _has_no_durable_note_signal(text: str) -> bool:

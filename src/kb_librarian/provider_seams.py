@@ -9,7 +9,11 @@ from typing import Any, Callable, Mapping
 BACKEND_DIRECT_HTTP = "direct_http"
 BACKEND_VENDOR_CLI = "vendor_cli"
 BACKEND_OLLAMA = "ollama"
+BACKEND_VLLM = "vllm"
+BACKEND_LM_STUDIO = "lm_studio"
 BACKEND_MOCK = "mock"
+
+LOCAL_BACKENDS = {BACKEND_OLLAMA, BACKEND_VLLM, BACKEND_LM_STUDIO}
 
 CREDENTIAL_SOURCE_API_KEY_ENV = "api_key_env"
 CREDENTIAL_SOURCE_VENDOR_CLI = "vendor_cli"
@@ -121,7 +125,7 @@ def provider_seam_supported_for_runtime(seam: ProviderSeam) -> tuple[bool, str |
             return True, None
         return False, _unsupported_runtime_message(seam)
     if seam.provider_name == "local":
-        if seam.backend == BACKEND_OLLAMA and seam.credential_source is None:
+        if seam.backend in LOCAL_BACKENDS and seam.credential_source is None:
             return True, None
         return False, _unsupported_runtime_message(seam)
     if seam.provider_name == "mock":
@@ -250,8 +254,9 @@ def _resolve_local_provider_seam(
     backend = _optional_string(provider_config, "backend", error_factory=error_factory, error_prefix=error_prefix)
     if backend is None:
         backend = BACKEND_OLLAMA
-    if backend != BACKEND_OLLAMA:
-        raise error_factory(f"Config key {error_prefix}.backend must be '{BACKEND_OLLAMA}'.")
+    if backend not in LOCAL_BACKENDS:
+        allowed_backends = ", ".join(sorted(LOCAL_BACKENDS))
+        raise error_factory(f"Config key {error_prefix}.backend must be one of: {allowed_backends}.")
     if provider_config.get("credential_source") is not None:
         raise error_factory(
             f"Config key {error_prefix}.credential_source is not supported for local backends."
@@ -347,7 +352,7 @@ def _unsupported_runtime_message(seam: ProviderSeam) -> str:
             f"Use backend={BACKEND_DIRECT_HTTP!r} with credential_source={CREDENTIAL_SOURCE_API_KEY_ENV!r} for now."
         )
     if seam.provider_name == "local":
-        return "Only the 'ollama' local backend is implemented in this CLI."
+        return "Supported local backends are: ollama, vllm, lm_studio."
     if seam.provider_name == "mock":
         return "Mock provider does not support custom backend or credential-source settings."
     return f"Provider {seam.provider_name!r} has an unsupported runtime configuration."

@@ -310,6 +310,14 @@ def test_validate_config_rejects_malformed_local_provider(tmp_path):
         validate_config(config)
 
     config = default_config(tmp_path)
+    config["providers"]["local"]["backend"] = "vllm"
+    validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["local"]["backend"] = "lm_studio"
+    validate_config(config)
+
+    config = default_config(tmp_path)
     config["providers"]["local"]["base_url"] = "127.0.0.1:11434"
     with pytest.raises(ConfigError, match="providers.local.base_url"):
         validate_config(config)

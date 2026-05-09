@@ -10,7 +10,7 @@ Set the configured environment variable before running provider-backed commands:
 export ANTHROPIC_API_KEY=your_key_here
 ```
 
-If you want local LLM behavior without cloud credentials, route provider-backed operations to the configured Ollama provider:
+If you want local LLM behavior without cloud credentials, route provider-backed operations to the configured local provider:
 
 ```yaml
 operations:
@@ -21,7 +21,7 @@ operations:
   synthesize: { provider: local, model: llama3.2 }
 ```
 
-Then start Ollama and pull the routed model:
+Then start the selected backend and make the routed model available. For Ollama:
 
 ```bash
 ollama pull llama3.2
@@ -58,15 +58,17 @@ Check these in order:
 
 ## Local provider routes fail
 
-The local provider currently supports Ollama through `providers.local.base_url`.
+The local provider supports `ollama`, `vllm`, and `lm_studio` through `providers.local.backend` and `providers.local.base_url`.
 
 Check these in order:
 
-1. Confirm Ollama is running at the configured base URL
-2. Run `ollama pull <model>` for every model used by local operation routes
-3. Run `kb doctor --data-dir <path>` and inspect the Providers section
-4. Increase `providers.local.timeout_seconds` if the model is slow to respond
-5. Switch operation routes back to Anthropic if local generation is unavailable
+1. Confirm the selected backend is running at the configured base URL
+2. For Ollama, run `ollama pull <model>` for every routed model
+3. For vLLM, confirm the running server is serving the routed model and exposes an OpenAI-compatible `/v1` API
+4. For LM Studio, confirm the local server is enabled and the routed model is loaded
+5. Run `kb doctor --data-dir <path>` and inspect the Providers section
+6. Increase `providers.local.timeout_seconds` if the model is slow to respond
+7. Switch operation routes back to Anthropic if local generation is unavailable
 
 ## `kb search` or `kb context` returns nothing useful
 

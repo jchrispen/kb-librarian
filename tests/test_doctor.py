@@ -205,6 +205,50 @@ def test_doctor_reports_local_provider_reachable_when_routed(tmp_path, monkeypat
     assert "local-provider-reachable" in rendered
 
 
+def test_doctor_reports_vllm_missing_models_when_routed(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    config["providers"]["local"]["backend"] = "vllm"
+    config["providers"]["local"]["base_url"] = "http://127.0.0.1:8000"
+    for operation in config["operations"]:
+        config["operations"][operation] = {"provider": "local", "model": "meta-llama/Meta-Llama-3-8B-Instruct"}
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    monkeypatch.setattr(
+        "kb_librarian.doctor.local_provider_status",
+        lambda *args, **kwargs: LocalProviderStatus(True, [], "vLLM backend is reachable."),
+    )
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 0
+    assert "local-provider-model-missing" in rendered
+    assert "Start vLLM with the routed model" in rendered
+
+
+def test_doctor_reports_lm_studio_unreachable_hint(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    config["providers"]["local"]["backend"] = "lm_studio"
+    config["providers"]["local"]["base_url"] = "http://127.0.0.1:1234"
+    for operation in config["operations"]:
+        config["operations"][operation] = {"provider": "local", "model": "qwen2.5-instruct"}
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    monkeypatch.setattr(
+        "kb_librarian.doctor.local_provider_status",
+        lambda *args, **kwargs: LocalProviderStatus(False, [], "LM Studio backend is unreachable."),
+    )
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 1
+    assert "local-provider-unreachable" in rendered
+    assert "LM Studio local server" in rendered
+
+
 def test_doctor_checks_fallback_provider_routes(tmp_path, monkeypatch):
     initialize_data_dir(tmp_path)
     config = _mock_config(tmp_path)

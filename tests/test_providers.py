@@ -12,6 +12,7 @@ from kb_librarian.config import default_config
 from kb_librarian.errors import ProviderError
 from kb_librarian.providers import (
     CodexProvider,
+    LocalOpenAICompatibleProvider,
     LocalOllamaProvider,
     MockProvider,
     call_with_provider_policy,
@@ -336,6 +337,42 @@ def test_provider_from_config_builds_local_ollama_provider():
     assert isinstance(provider, LocalOllamaProvider)
 
 
+def test_provider_from_config_builds_local_vllm_provider():
+    provider = provider_from_config(
+        {
+            "providers": {
+                "local": {
+                    "backend": "vllm",
+                    "base_url": "http://127.0.0.1:8000",
+                    "timeout_seconds": 3,
+                }
+            }
+        },
+        "local",
+    )
+
+    assert isinstance(provider, LocalOpenAICompatibleProvider)
+    assert provider.backend == "vllm"
+
+
+def test_provider_from_config_builds_local_lm_studio_provider():
+    provider = provider_from_config(
+        {
+            "providers": {
+                "local": {
+                    "backend": "lm_studio",
+                    "base_url": "http://127.0.0.1:1234",
+                    "timeout_seconds": 3,
+                }
+            }
+        },
+        "local",
+    )
+
+    assert isinstance(provider, LocalOpenAICompatibleProvider)
+    assert provider.backend == "lm_studio"
+
+
 def test_provider_from_config_builds_codex_provider():
     provider = provider_from_config(
         {
@@ -550,3 +587,106 @@ def test_local_provider_status_reports_models(monkeypatch):
 
     assert status.reachable is True
     assert status.models == ["llama3.2:latest"]
+
+
+def test_local_vllm_provider_maps_structured_response(monkeypatch):
+    requests = []
+
+    def fake_urlopen(request, timeout):  # noqa: ANN001
+        requests.append((request, json.loads(request.data.decode("utf-8")), timeout))
+        return _FakeResponse(
+            {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": json.dumps(
+                                    {
+                                        "candidates": [
+                                            {
+                                                "title": "vLLM note",
+                                                "summary": "vLLM returns structured output.",
+                                                "knowledge_type": "technique",
+                                                "body": "## Core idea\n\nUse vLLM local routes.\n",
+                                                "retrieval_phrases": ["vllm local"],
+                                                "tags": ["vllm"],
+                                                "confidence": "high",
+                                                "utility_score": "high",
+                                            }
+                                        ]
+                                    }
+                                ),
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr("kb_librarian.providers.urllib.request.urlopen", fake_urlopen)
+
+    provider = LocalOpenAICompatibleProvider(backend="vllm", base_url="http://localhost:8000", timeout_seconds=7)
+    result = provider.extract_candidates(
+        text="# vLLM\n\nUse local structured routes.",
+        source_path=Path("raw/vllm.md"),
+        max_notes=2,
+        model="NousResearch/Meta-Llama-3-8B-Instruct",
+    )
+
+    request, body, timeout = requests[0]
+    assert result.candidates[0].title == "vLLM note"
+    assert request.full_url == "http://localhost:8000/v1/responses"
+    assert body["text"]["format"]["type"] == "json_object"
+    assert timeout == 7
+
+
+def test_local_lm_studio_provider_uses_existing_v1_base_url(monkeypatch):
+    requests = []
+
+    def fake_urlopen(request, timeout):  # noqa: ANN001
+        requests.append((request.full_url, json.loads(request.data.decode("utf-8")), timeout))
+        return _FakeResponse({"output_text": "## Directly relevant techniques\n\n- local route\n"})
+
+    monkeypatch.setattr("kb_librarian.providers.urllib.request.urlopen", fake_urlopen)
+
+    provider = LocalOpenAICompatibleProvider(
+        backend="lm_studio",
+        base_url="http://localhost:1234/v1",
+        timeout_seconds=5,
+    )
+    result = provider.synthesize_context(task="x", selected_notes=[], model="qwen2.5-instruct")
+
+    assert "Directly relevant techniques" in result
+    assert requests[0][0] == "http://localhost:1234/v1/responses"
+    assert "text" not in requests[0][1]
+    assert requests[0][2] == 5
+
+
+def test_local_openai_compatible_provider_maps_transport_error(monkeypatch):
+    def fake_urlopen(request, timeout):  # noqa: ANN001
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr("kb_librarian.providers.urllib.request.urlopen", fake_urlopen)
+    provider = LocalOpenAICompatibleProvider(backend="lm_studio", base_url="http://localhost:1234")
+
+    with pytest.raises(ProviderError, match="LM Studio"):
+        provider.synthesize_context(task="x", selected_notes=[], model="qwen2.5-instruct")
+
+
+def test_local_provider_status_reports_openai_compatible_models(monkeypatch):
+    def fake_urlopen(request, timeout):  # noqa: ANN001
+        assert request.full_url == "http://localhost:8000/v1/models"
+        assert timeout == 2
+        return _FakeResponse({"data": [{"id": "NousResearch/Meta-Llama-3-8B-Instruct"}]})
+
+    monkeypatch.setattr("kb_librarian.providers.urllib.request.urlopen", fake_urlopen)
+
+    status = local_provider_status(
+        {"backend": "vllm", "base_url": "http://localhost:8000"},
+        timeout_seconds=2,
+    )
+
+    assert status.reachable is True
+    assert status.models == ["NousResearch/Meta-Llama-3-8B-Instruct"]

@@ -168,7 +168,7 @@ export OPENAI_API_KEY=your_key_here
 
 `providers.codex.base_url` may point at another Responses API compatible endpoint. `kb doctor` reports the active backend and credential source, and warns when Codex routes are configured but the credential environment variable is unset.
 
-The generated config also includes an opt-in local provider section for Ollama:
+The generated config also includes an opt-in local provider section. Ollama remains the default:
 
 ```yaml
 providers:
@@ -189,13 +189,33 @@ operations:
   synthesize: { provider: local, model: llama3.2 }
 ```
 
-When all provider-backed operation routes use `provider: local`, cloud credentials are not required. Start Ollama and pull the configured model before running provider-backed commands:
+To switch to `vllm`, set the backend explicitly and point `base_url` at the running server root or `/v1` base:
+
+```yaml
+providers:
+  local:
+    backend: vllm
+    base_url: http://127.0.0.1:8000
+    timeout_seconds: 120
+```
+
+To switch to `lm_studio`, set the backend and point `base_url` at the LM Studio local server:
+
+```yaml
+providers:
+  local:
+    backend: lm_studio
+    base_url: http://127.0.0.1:1234
+    timeout_seconds: 120
+```
+
+When all provider-backed operation routes use `provider: local`, cloud credentials are not required. Start the selected backend and make the configured model available before running provider-backed commands. For Ollama, pull the model first:
 
 ```bash
 ollama pull llama3.2
 ```
 
-`kb doctor` checks local-provider reachability and reports missing routed models when local routes are configured.
+`kb doctor` checks local-provider reachability and reports missing routed models when local routes are configured. For Ollama it suggests `ollama pull`; for vLLM it expects the routed model to be served by the running instance; for LM Studio it expects the routed model to be loaded in the local server.
 
 Cloud providers also accept explicit future-facing seam fields:
 
@@ -233,7 +253,7 @@ providers:
           model: gpt-5.1-codex
 ```
 
-Fallback never runs for configuration errors, missing credentials, provider response schema errors, or other non-transient failures. Provider attempts are bounded by the configured fallback list and each attempted provider uses `providers.retry` independently. `kb doctor` validates fallback references and checks configured fallback providers such as Codex credentials or local Ollama reachability.
+Fallback never runs for configuration errors, missing credentials, provider response schema errors, or other non-transient failures. Provider attempts are bounded by the configured fallback list and each attempted provider uses `providers.retry` independently. `kb doctor` validates fallback references and checks configured fallback providers such as Codex credentials or local backend reachability.
 
 ## Privacy Configuration
 

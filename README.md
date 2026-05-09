@@ -184,7 +184,7 @@ Cloud providers now expose explicit backend and credential-source seams. The cur
 
 The generated config includes an opt-in `providers.codex` section for OpenAI Responses API compatible cloud routes. To use it, set operation routes to `provider: codex`, choose Codex model IDs, set `OPENAI_API_KEY` or the configured credential environment variable, and run `kb doctor` to verify the route configuration and reported backend/auth-source metadata.
 
-The generated config also includes an opt-in `providers.local` section for Ollama. To run provider-backed operations locally, set the operation routes to `provider: local`, choose an installed Ollama model, start Ollama, and run `kb doctor` to verify reachability.
+The generated config also includes an opt-in `providers.local` section for local backends. `backend: ollama` remains the default, and Phase 06b adds explicit `vllm` and `lm_studio` support through their OpenAI-compatible local APIs. To run provider-backed operations locally, set the operation routes to `provider: local`, choose a model available in the selected backend, start that backend, and run `kb doctor` to verify reachability and routed-model availability.
 
 Provider retries are configurable under `providers.retry` (`max_attempts`, `base_delay_seconds`, `max_delay_seconds`, `jitter_seconds`) and apply to provider-backed operations. Explicit provider policy is configured under `providers.policy`: `default_provider` supplies a provider when an operation omits one, and `fallback` lists bounded per-operation fallback routes that run only after transient failures exhaust retries.
 
