@@ -62,3 +62,9 @@ For repo-local slash-style requests, use `docs/commands/` as the command-spec di
 - Treat these `SKILL.md` files as repo command playbooks, not as global standing instructions or native runtime skills.
 - Instruction precedence remains: direct user request, then `AGENTS.md`, then the selected command spec, then other repo docs.
 - Keep command specs short, procedural, and heavy on file references rather than duplicated design detail.
+
+For shared agent skills, see [`.agents/agent-skills/AGENTS.md`](.agents/agent-skills/AGENTS.md).
+
+- For OpenCode, Codex CLI, and other `AGENTS.md`-aware agents, treat `.agents/agent-skills/AGENTS.md` as an active skill index, not a passive reference.
+- Before planning or editing, if the task plausibly matches one of those shared skill descriptions, read the matching `.agents/agent-skills/skills/<name>/SKILL.md` first and follow any referenced files it points to.
+- Prefer repo-local command specs in `docs/commands/` when the user is invoking a repo command; otherwise use the shared skills when they match.
