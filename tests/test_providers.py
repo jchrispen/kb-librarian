@@ -13,6 +13,7 @@ from kb_librarian.config import default_config
 from kb_librarian.errors import ProviderError
 from kb_librarian.providers import (
     ClaudeCliProvider,
+    CodexCliProvider,
     CodexProvider,
     LocalOpenAICompatibleProvider,
     LocalOllamaProvider,
@@ -394,6 +395,29 @@ def test_provider_from_config_builds_codex_provider():
     assert isinstance(provider, CodexProvider)
 
 
+def test_provider_from_config_builds_codex_vendor_cli_provider(monkeypatch):
+    monkeypatch.setattr("kb_librarian.providers.shutil.which", lambda command: f"/usr/bin/{command}")
+
+    provider = provider_from_config(
+        {
+            "providers": {
+                "codex": {
+                    "backend": "vendor_cli",
+                    "credential_source": "vendor_cli",
+                    "cli_command": "codex",
+                    "base_url": "https://api.openai.com/v1",
+                    "timeout_seconds": 3,
+                }
+            }
+        },
+        "codex",
+        env={},
+    )
+
+    assert isinstance(provider, CodexCliProvider)
+    assert provider.command_path == "/usr/bin/codex"
+
+
 def test_provider_from_config_preserves_legacy_api_key_config():
     provider = provider_from_config(
         {
@@ -417,6 +441,25 @@ def test_provider_from_config_requires_codex_api_key():
                 "providers": {
                     "codex": {
                         "api_key_env": "OPENAI_API_KEY",
+                        "base_url": "https://api.openai.com/v1",
+                    }
+                }
+            },
+            "codex",
+            env={},
+        )
+
+
+def test_provider_from_config_requires_codex_cli_binary(monkeypatch):
+    monkeypatch.setattr("kb_librarian.providers.shutil.which", lambda command: None)
+
+    with pytest.raises(ProviderError, match="Codex CLI command 'codex' was not found"):
+        provider_from_config(
+            {
+                "providers": {
+                    "codex": {
+                        "backend": "vendor_cli",
+                        "credential_source": "vendor_cli",
                         "base_url": "https://api.openai.com/v1",
                     }
                 }
@@ -561,6 +604,74 @@ def test_codex_provider_http_errors_feed_retry_classification(monkeypatch):
     classification = classify_provider_failure(exc_info.value)
     assert classification.transient is True
     assert classification.detail == "http_status=429"
+
+
+def test_codex_cli_provider_maps_structured_response(monkeypatch):
+    commands = []
+
+    def fake_run(command, **kwargs):  # noqa: ANN001
+        commands.append((command, kwargs))
+        output_path = Path(command[command.index("--output-last-message") + 1])
+        output_path.write_text(
+            json.dumps(
+                {
+                    "candidates": [
+                        {
+                            "title": "Codex CLI note",
+                            "summary": "Codex CLI delegation returns structured notes.",
+                            "knowledge_type": "technique",
+                            "body": "## Core idea\n\nUse Codex CLI delegation.\n",
+                            "retrieval_phrases": ["codex cli delegation"],
+                            "tags": ["codex"],
+                            "confidence": "high",
+                            "utility_score": "high",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("kb_librarian.providers.subprocess.run", fake_run)
+
+    provider = CodexCliProvider(
+        command_path="/usr/bin/codex",
+        timeout_seconds=12,
+        env={"HOME": "/tmp/test-home"},
+    )
+    result = provider.extract_candidates(
+        text="# Codex CLI\n\nUse account-backed Codex routing.",
+        source_path=Path("raw/codex-cli.md"),
+        max_notes=2,
+        model="gpt-5-codex",
+    )
+
+    command, kwargs = commands[0]
+    assert result.candidates[0].title == "Codex CLI note"
+    assert command[:4] == ["/usr/bin/codex", "exec", "--sandbox", "read-only"]
+    assert "--output-schema" in command
+    assert kwargs["cwd"] == "/tmp/opencode"
+    assert kwargs["timeout"] == 12
+    assert kwargs["env"] == {"HOME": "/tmp/test-home"}
+    assert kwargs["input"].startswith("Extract durable KB Librarian candidate notes")
+
+
+def test_codex_cli_provider_surfaces_login_required_error(monkeypatch):
+    def fake_run(command, **kwargs):  # noqa: ANN001
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="Please run codex login to continue.",
+            stderr="",
+        )
+
+    monkeypatch.setattr("kb_librarian.providers.subprocess.run", fake_run)
+
+    provider = CodexCliProvider(command_path="/usr/bin/codex")
+
+    with pytest.raises(ProviderError, match="requires an active ChatGPT login"):
+        provider.synthesize_context(task="x", selected_notes=[], model="gpt-5-codex")
 
 
 def test_claude_cli_provider_maps_structured_response(monkeypatch):

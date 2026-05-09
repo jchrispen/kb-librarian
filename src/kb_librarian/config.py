@@ -22,7 +22,10 @@ from kb_librarian.paths import (
 )
 from kb_librarian.provider_seams import (
     BACKEND_DIRECT_HTTP,
+    BACKEND_VENDOR_CLI,
+    CODEX_DEFAULT_BASE_URL,
     CREDENTIAL_SOURCE_API_KEY_ENV,
+    resolve_provider_seam,
     validate_provider_seam_config,
 )
 
@@ -99,7 +102,7 @@ def default_config(data_dir: str | Path | None = None, *, hooks: bool = False) -
                 "backend": BACKEND_DIRECT_HTTP,
                 "credential_source": CREDENTIAL_SOURCE_API_KEY_ENV,
                 "api_key_env": "OPENAI_API_KEY",
-                "base_url": "https://api.openai.com/v1",
+                "base_url": CODEX_DEFAULT_BASE_URL,
                 "timeout_seconds": 120,
             },
             "local": {
@@ -321,12 +324,33 @@ def validate_config(config: Mapping[str, Any]) -> None:
             error_factory=ConfigError,
             error_prefix="providers.codex",
         )
+        codex_seam = resolve_provider_seam(
+            "codex",
+            codex,
+            error_factory=ConfigError,
+            error_prefix="providers.codex",
+        )
         base_url = codex.get("base_url")
         if not isinstance(base_url, str) or not base_url.strip():
             raise ConfigError("Config key providers.codex.base_url must be a non-empty URL.")
-        parsed_base_url = urlparse(base_url.strip())
+        normalized_base_url = base_url.strip().rstrip("/")
+        parsed_base_url = urlparse(normalized_base_url)
         if parsed_base_url.scheme not in {"http", "https"} or not parsed_base_url.netloc:
             raise ConfigError("Config key providers.codex.base_url must be an http(s) URL.")
+        if codex_seam.backend == BACKEND_VENDOR_CLI and normalized_base_url != CODEX_DEFAULT_BASE_URL:
+            raise ConfigError(
+                "Config key providers.codex.base_url must remain https://api.openai.com/v1 when "
+                "providers.codex.backend='vendor_cli'. Codex CLI delegation only supports the built-in "
+                "ChatGPT/OpenAI account endpoint."
+            )
+        for key in ("organization", "project"):
+            value = codex.get(key)
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ConfigError(f"Config key providers.codex.{key} must be a non-empty string when present.")
+            if codex_seam.backend == BACKEND_VENDOR_CLI and value is not None:
+                raise ConfigError(
+                    f"Config key providers.codex.{key} is supported only with backend '{BACKEND_DIRECT_HTTP}'."
+                )
         _validate_positive_number(codex, "providers.codex.timeout_seconds")
 
     local = config["providers"].get("local")

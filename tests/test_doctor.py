@@ -7,7 +7,7 @@ from kb_librarian.doctor import render_doctor_report, render_self_test_report, r
 from kb_librarian.indexing import reindex_data_dir
 from kb_librarian.init import initialize_data_dir
 from kb_librarian.notes import Note, write_note
-from kb_librarian.providers import ClaudeCliStatus, LocalProviderStatus
+from kb_librarian.providers import ClaudeCliStatus, CodexCliStatus, LocalProviderStatus
 from kb_librarian.storage import canonical_note_path
 
 
@@ -347,6 +347,38 @@ def test_doctor_reports_anthropic_vendor_cli_token_env_warning(tmp_path):
     assert report.error_count == 0
     assert "anthropic-cli-token-unset" in rendered
     assert "CLAUDE_CODE_OAUTH_TOKEN" in rendered
+
+
+def test_doctor_reports_codex_vendor_cli_login_status(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    config["providers"]["codex"] = {
+        "backend": "vendor_cli",
+        "credential_source": "vendor_cli",
+        "base_url": "https://api.openai.com/v1",
+    }
+    for operation in config["operations"]:
+        config["operations"][operation] = {"provider": "codex", "model": "gpt-5-codex"}
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    monkeypatch.setattr(
+        "kb_librarian.doctor.codex_cli_status",
+        lambda *args, **kwargs: CodexCliStatus(
+            available=True,
+            authenticated=False,
+            code="login_required",
+            message="Codex CLI login is missing. Run `codex login` or `codex login --device-auth` and retry.",
+            command_path="/usr/bin/codex",
+        ),
+    )
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 0
+    assert "provider-seam" in rendered
+    assert "codex-cli-login_required" in rendered
+    assert "backend=vendor_cli credential_source=vendor_cli" in rendered
 
 
 def test_doctor_warns_when_privacy_blocks_cloud_routes(tmp_path):

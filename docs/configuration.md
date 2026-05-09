@@ -200,6 +200,34 @@ export OPENAI_API_KEY=your_key_here
 
 `providers.codex.base_url` may point at another Responses API compatible endpoint. `kb doctor` reports the active backend and credential source, and warns when Codex routes are configured but the credential environment variable is unset.
 
+If you prefer ChatGPT account auth instead of `OPENAI_API_KEY`, switch Codex to vendor CLI delegation:
+
+```yaml
+providers:
+  codex:
+    backend: vendor_cli
+    credential_source: vendor_cli
+    cli_command: codex
+    base_url: https://api.openai.com/v1
+    timeout_seconds: 120
+```
+
+Before using that route, sign in locally:
+
+```bash
+codex login
+codex login status
+```
+
+For headless environments, use the supported device flow instead:
+
+```bash
+codex login --device-auth
+codex login status
+```
+
+Codex vendor CLI delegation always uses Codex's built-in ChatGPT/OpenAI account path. Keep `providers.codex.base_url` at `https://api.openai.com/v1` for `backend: vendor_cli`; alternate Responses API compatible endpoints remain available only through `backend: direct_http` with API-key auth. KB Librarian does not parse Codex credential files or forward ChatGPT account auth to arbitrary OpenAI-compatible endpoints.
+
 The generated config also includes an opt-in local provider section. Ollama remains the default:
 
 ```yaml
@@ -251,12 +279,12 @@ ollama pull llama3.2
 
 Cloud providers also accept explicit seam fields:
 
-- `backend`: `direct_http`, or Anthropic `vendor_cli`
-- `credential_source`: `api_key_env`, Anthropic `vendor_cli`, Anthropic `token_env`, or future `command`
-- `cli_command`: optional executable name or path for vendor-CLI delegation; defaults to `claude` for Anthropic
+- `backend`: `direct_http`, or `vendor_cli` for Anthropic and Codex
+- `credential_source`: `api_key_env`, `vendor_cli`, Anthropic `token_env`, or future `command`
+- `cli_command`: optional executable name or path for vendor-CLI delegation; defaults to `claude` for Anthropic and `codex` for Codex
 - `timeout_seconds`: optional provider timeout override for Anthropic and Codex routes
 
-Existing API-key configs remain valid when these fields are absent. Anthropic `vendor_cli` is implemented in this release. Unsupported seams such as Codex `vendor_cli` or direct-http `credential_source: command` still fail explicitly instead of silently falling back to API-key behavior.
+Existing API-key configs remain valid when these fields are absent. Anthropic and Codex `vendor_cli` delegation are implemented in this release. Direct-http `credential_source: command` and unsupported auth/endpoint combinations still fail explicitly instead of silently falling back to API-key behavior.
 
 `providers.retry` controls bounded retry/backoff behavior for provider-backed operations:
 

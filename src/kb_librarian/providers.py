@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ from kb_librarian.provider_seams import (
     BACKEND_LM_STUDIO,
     BACKEND_OLLAMA,
     BACKEND_VLLM,
+    CODEX_DEFAULT_BASE_URL,
     CREDENTIAL_SOURCE_API_KEY_ENV,
     CREDENTIAL_SOURCE_TOKEN_ENV,
     CREDENTIAL_SOURCE_VENDOR_CLI,
@@ -47,6 +49,10 @@ INTEGRATION_VERDICTS = {"identical", "adds_nuance", "contradicts", "unrelated"}
 CLAUDE_CLI_DEFAULT_COMMAND = "claude"
 CLAUDE_CLI_STATUS_TIMEOUT_SECONDS = 10.0
 CLAUDE_CLI_WORKDIR = Path("/tmp/opencode")
+
+CODEX_CLI_DEFAULT_COMMAND = "codex"
+CODEX_CLI_STATUS_TIMEOUT_SECONDS = 10.0
+CODEX_CLI_WORKDIR = CLAUDE_CLI_WORKDIR
 
 _CLAUDE_CLI_UNSUPPORTED_TOKENS = (
     "unknown option",
@@ -70,6 +76,30 @@ _CLAUDE_CLI_LOGIN_REQUIRED_TOKENS = (
     "login required",
     "please run claude auth login",
     "run claude auth login",
+    "authentication required",
+)
+
+_CODEX_CLI_UNSUPPORTED_TOKENS = (
+    "unknown option",
+    "unknown command",
+    "unexpected argument",
+    "no such option",
+    "--output-schema",
+    "--output-last-message",
+)
+_CODEX_CLI_EXPIRED_TOKENS = (
+    "expired",
+    "reauth",
+    "re-auth",
+    "refresh token",
+    "invalid grant",
+    "token expired",
+)
+_CODEX_CLI_LOGIN_REQUIRED_TOKENS = (
+    "not logged in",
+    "login required",
+    "please run codex login",
+    "run codex login",
     "authentication required",
 )
 
@@ -164,6 +194,15 @@ class LocalProviderStatus:
 
 @dataclass(frozen=True)
 class ClaudeCliStatus:
+    available: bool
+    authenticated: bool
+    code: str
+    message: str
+    command_path: str | None = None
+
+
+@dataclass(frozen=True)
+class CodexCliStatus:
     available: bool
     authenticated: bool
     code: str
@@ -380,7 +419,46 @@ def provider_from_config(
         base_url = provider_config.get("base_url")
         if not isinstance(base_url, str) or not base_url.strip():
             raise ProviderError("Config key providers.codex.base_url is required.")
+        normalized_base_url = base_url.strip().rstrip("/")
         environ = os.environ if env is None else env
+        timeout = _provider_timeout_seconds(provider_config.get("timeout_seconds"), default=120.0)
+        organization = provider_config.get("organization")
+        if organization is not None and not isinstance(organization, str):
+            raise ProviderError("Config key providers.codex.organization must be a string when present.")
+        if isinstance(organization, str):
+            organization = organization.strip()
+            if not organization:
+                raise ProviderError("Config key providers.codex.organization must be a string when present.")
+        project = provider_config.get("project")
+        if project is not None and not isinstance(project, str):
+            raise ProviderError("Config key providers.codex.project must be a string when present.")
+        if isinstance(project, str):
+            project = project.strip()
+            if not project:
+                raise ProviderError("Config key providers.codex.project must be a string when present.")
+        if seam.backend == BACKEND_VENDOR_CLI:
+            if normalized_base_url != CODEX_DEFAULT_BASE_URL:
+                raise ProviderError(
+                    "Config key providers.codex.base_url must remain https://api.openai.com/v1 when "
+                    "providers.codex.backend is 'vendor_cli'. Codex CLI delegation only supports the built-in "
+                    "ChatGPT/OpenAI account endpoint."
+                )
+            if organization is not None:
+                raise ProviderError("Config key providers.codex.organization is supported only with backend 'direct_http'.")
+            if project is not None:
+                raise ProviderError("Config key providers.codex.project is supported only with backend 'direct_http'.")
+            cli_command = seam.cli_command or CODEX_CLI_DEFAULT_COMMAND
+            command_path = _resolve_cli_command_path(cli_command)
+            if command_path is None:
+                raise ProviderError(
+                    f"Codex CLI command {cli_command!r} was not found. Install Codex or set "
+                    "providers.codex.cli_command to the correct executable path."
+                )
+            return CodexCliProvider(
+                command_path=command_path,
+                timeout_seconds=timeout,
+                env=None if env is None else dict(env),
+            )
         api_key_env = seam.api_key_env or "OPENAI_API_KEY"
         api_key = environ.get(api_key_env)
         if not api_key:
@@ -389,19 +467,12 @@ def provider_from_config(
                 f"Set environment variable {api_key_env} "
                 "or switch providers.codex.credential_source back to 'api_key_env'."
             )
-        timeout = _provider_timeout_seconds(provider_config.get("timeout_seconds"), default=120.0)
-        organization = provider_config.get("organization")
-        if organization is not None and not isinstance(organization, str):
-            raise ProviderError("Config key providers.codex.organization must be a string when present.")
-        project = provider_config.get("project")
-        if project is not None and not isinstance(project, str):
-            raise ProviderError("Config key providers.codex.project must be a string when present.")
         return CodexProvider(
             api_key=api_key,
             base_url=base_url,
             timeout_seconds=timeout,
-            organization=organization.strip() if isinstance(organization, str) else None,
-            project=project.strip() if isinstance(project, str) else None,
+            organization=organization,
+            project=project,
         )
     if provider_name == "local":
         seam = _provider_seam(provider_name, provider_config)
@@ -652,6 +723,88 @@ def claude_cli_status(
         authenticated=False,
         code="login_required",
         message="Claude Code auth status reports no active login. Run `claude auth login` and retry.",
+        command_path=command_path,
+    )
+
+
+def codex_cli_status(
+    command: str = CODEX_CLI_DEFAULT_COMMAND,
+    *,
+    env: Mapping[str, str] | None = None,
+    timeout_seconds: float = CODEX_CLI_STATUS_TIMEOUT_SECONDS,
+) -> CodexCliStatus:
+    """Return Codex CLI login status for doctor checks."""
+
+    command_path = _resolve_cli_command_path(command)
+    if command_path is None:
+        return CodexCliStatus(
+            available=False,
+            authenticated=False,
+            code="missing_command",
+            message=(
+                f"Codex CLI command {command!r} was not found. Install Codex or set "
+                "providers.codex.cli_command to the correct executable path."
+            ),
+        )
+
+    try:
+        result = subprocess.run(
+            [command_path, "login", "status"],
+            cwd=str(CODEX_CLI_WORKDIR),
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            env=None if env is None else dict(env),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return CodexCliStatus(
+            available=True,
+            authenticated=False,
+            code="status_timeout",
+            message=(
+                "Codex CLI login status timed out. Retry `codex login status`, check local CLI health, "
+                "or switch providers.codex.credential_source back to 'api_key_env'."
+            ),
+            command_path=command_path,
+        )
+    except OSError as exc:
+        return CodexCliStatus(
+            available=False,
+            authenticated=False,
+            code="command_error",
+            message=f"Codex CLI command {command!r} could not be executed: {exc}",
+            command_path=command_path,
+        )
+
+    output = _combined_subprocess_output(result.stdout, result.stderr)
+    code = _classify_codex_cli_auth_failure(output)
+    if code in {"login_required", "expired", "unsupported_cli"} or result.returncode != 0:
+        return CodexCliStatus(
+            available=True,
+            authenticated=False,
+            code=code,
+            message=_codex_cli_status_message(code, output),
+            command_path=command_path,
+        )
+
+    if "logged in" in output.lower():
+        return CodexCliStatus(
+            available=True,
+            authenticated=True,
+            code="authenticated",
+            message="Codex CLI login status reports an active ChatGPT login.",
+            command_path=command_path,
+        )
+
+    return CodexCliStatus(
+        available=True,
+        authenticated=False,
+        code="unsupported_cli",
+        message=(
+            "Codex CLI login status did not return a recognizable result. Update Codex or switch "
+            "providers.codex.credential_source back to 'api_key_env'."
+        ),
         command_path=command_path,
     )
 
@@ -1638,6 +1791,94 @@ class ClaudeCliProvider:
         return envelope
 
 
+class CodexCliProvider(AnthropicProvider):
+    """Codex CLI delegation adapter for ChatGPT account-backed auth."""
+
+    def __init__(
+        self,
+        *,
+        command_path: str,
+        timeout_seconds: float = 120.0,
+        env: Mapping[str, str] | None = None,
+    ) -> None:
+        self.command_path = command_path
+        self.timeout_seconds = timeout_seconds
+        self.env = None if env is None else dict(env)
+
+    def _messages_json(self, *, model: str, prompt: str) -> Any:
+        text = self._codex_exec(model=model, prompt=prompt, schema=_codex_cli_json_object_schema())
+        return parse_json_response(text)
+
+    def _messages_text(self, *, model: str, prompt: str) -> str:
+        return self._codex_exec(model=model, prompt=prompt, schema=None)
+
+    def _codex_exec(self, *, model: str, prompt: str, schema: Mapping[str, Any] | None) -> str:
+        if not model:
+            raise ProviderError("Codex provider operation requires a model.")
+
+        try:
+            with tempfile.TemporaryDirectory(prefix="kb-librarian-codex-") as temp_dir:
+                temp_root = Path(temp_dir)
+                output_path = temp_root / "last-message.txt"
+                command = [
+                    self.command_path,
+                    "exec",
+                    "--sandbox",
+                    "read-only",
+                    "--ask-for-approval",
+                    "never",
+                    "--skip-git-repo-check",
+                    "--ephemeral",
+                    "--ignore-rules",
+                    "--ignore-user-config",
+                    "--color",
+                    "never",
+                    "--output-last-message",
+                    str(output_path),
+                    "--model",
+                    model,
+                ]
+                if schema is not None:
+                    schema_path = temp_root / "schema.json"
+                    schema_path.write_text(json.dumps(schema, sort_keys=True), encoding="utf-8")
+                    command.extend(["--output-schema", str(schema_path)])
+                command.append("-")
+                result = subprocess.run(
+                    command,
+                    cwd=str(CODEX_CLI_WORKDIR),
+                    input=prompt,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.timeout_seconds,
+                    env=self.env,
+                    check=False,
+                )
+                output = _combined_subprocess_output(result.stdout, result.stderr)
+                if result.returncode != 0:
+                    raise ProviderError(_codex_cli_provider_error_message(output))
+                try:
+                    last_message = output_path.read_text(encoding="utf-8")
+                except OSError as exc:
+                    raise ProviderError(
+                        "Codex CLI response could not be read from the delegated output file. Update Codex or switch "
+                        "providers.codex.credential_source back to 'api_key_env'."
+                    ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise ProviderError(
+                f"Codex CLI delegation timed out after {self.timeout_seconds:g}s. "
+                "Increase providers.codex.timeout_seconds or switch the operation route."
+            ) from exc
+        except OSError as exc:
+            raise ProviderError(f"Codex CLI delegation failed to start: {exc}") from exc
+
+        if not last_message.strip():
+            raise ProviderError(
+                "Codex CLI response did not contain a final message. Update Codex or switch "
+                "providers.codex.credential_source back to 'api_key_env'."
+            )
+        return last_message
+
+
 class CodexProvider(AnthropicProvider):
     """Codex-compatible Responses API adapter using structured JSON prompts."""
 
@@ -2185,8 +2426,76 @@ def _claude_cli_provider_error_message(output: str, credential_source: str, toke
     return message
 
 
+def _classify_codex_cli_auth_failure(output: str) -> str:
+    lowered = output.lower()
+    if any(token in lowered for token in _CODEX_CLI_EXPIRED_TOKENS):
+        return "expired"
+    if any(token in lowered for token in _CODEX_CLI_LOGIN_REQUIRED_TOKENS):
+        return "login_required"
+    if any(token in lowered for token in _CODEX_CLI_UNSUPPORTED_TOKENS):
+        return "unsupported_cli"
+    return "auth_check_failed"
+
+
+def _codex_cli_status_message(code: str, output: str) -> str:
+    excerpt = _output_excerpt(output)
+    if code == "expired":
+        message = "Codex CLI login appears expired. Run `codex login` again and retry."
+    elif code == "login_required":
+        message = "Codex CLI login is missing. Run `codex login` or `codex login --device-auth` and retry."
+    elif code == "unsupported_cli":
+        message = (
+            "Installed Codex CLI does not support the required auth or exec interface. Update Codex or switch "
+            "providers.codex.credential_source back to 'api_key_env'."
+        )
+    else:
+        message = (
+            "Codex CLI login status failed. Retry `codex login status`, check the local CLI installation, or switch "
+            "providers.codex.credential_source back to 'api_key_env'."
+        )
+    if excerpt:
+        message += f" Output: {excerpt}"
+    return message
+
+
+def _codex_cli_provider_error_message(output: str) -> str:
+    code = _classify_codex_cli_auth_failure(output)
+    excerpt = _output_excerpt(output)
+    if code == "expired":
+        message = (
+            "Codex CLI login appears expired. Run `codex login` again, or switch providers.codex.credential_source "
+            "back to 'api_key_env'."
+        )
+    elif code == "login_required":
+        message = (
+            "Codex CLI delegation requires an active ChatGPT login. Run `codex login` or `codex login --device-auth`, "
+            "or switch providers.codex.credential_source back to 'api_key_env'."
+        )
+    elif code == "unsupported_cli":
+        message = (
+            "Installed Codex CLI does not support the required non-interactive flags (`codex exec`, "
+            "`--output-schema`, `--output-last-message`). Update Codex or switch providers.codex.credential_source "
+            "back to 'api_key_env'."
+        )
+    else:
+        message = (
+            "Codex CLI delegation failed. Check `codex login status`, confirm the configured model is available to "
+            "your account, and inspect the local Codex CLI installation."
+        )
+    if excerpt:
+        message += f" Output: {excerpt}"
+    return message
+
+
 def _output_excerpt(output: str) -> str:
     return output.strip().replace("\n", " ")[:240]
+
+
+def _codex_cli_json_object_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": True,
+    }
 
 
 def _claude_candidate_schema() -> dict[str, Any]:

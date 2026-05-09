@@ -64,16 +64,21 @@ Use `privacy.redact_patterns` for known sensitive string patterns. Redaction aff
 
 ## Codex provider routes fail
 
-Codex-compatible routes use `providers.codex.api_key_env` and `providers.codex.base_url`.
+Codex-compatible routes support two auth modes:
+
+- `backend: direct_http` with `providers.codex.api_key_env` and `providers.codex.base_url`
+- `backend: vendor_cli` with the installed `codex` CLI and a ChatGPT login managed by Codex itself
 
 Check these in order:
 
-1. Confirm the configured environment variable is set, usually `OPENAI_API_KEY`
-2. Confirm every Codex-routed operation uses an available model ID
-3. Run `kb doctor --data-dir <path>` and inspect the Providers section
-4. Increase `providers.codex.timeout_seconds` if requests time out
-5. Check `providers.codex.base_url` if you use a non-default Responses API compatible endpoint
-6. Switch operation routes to Anthropic or local if Codex access is unavailable
+1. Confirm which Codex backend is configured in `.kb/config.yaml`
+2. For `backend: direct_http`, confirm the configured environment variable is set, usually `OPENAI_API_KEY`
+3. For `backend: vendor_cli`, run `codex login` or `codex login --device-auth`, then check `codex login status`
+4. Confirm every Codex-routed operation uses an available model ID
+5. Run `kb doctor --data-dir <path>` and inspect the Providers section
+6. Increase `providers.codex.timeout_seconds` if requests or delegated CLI calls time out
+7. Keep `providers.codex.base_url: https://api.openai.com/v1` when using `backend: vendor_cli`; alternate compatible endpoints are supported only with `backend: direct_http`
+8. Switch operation routes to Anthropic or local if Codex access is unavailable
 
 ## Local provider routes fail
 

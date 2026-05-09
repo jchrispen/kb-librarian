@@ -13,6 +13,8 @@ BACKEND_VLLM = "vllm"
 BACKEND_LM_STUDIO = "lm_studio"
 BACKEND_MOCK = "mock"
 
+CODEX_DEFAULT_BASE_URL = "https://api.openai.com/v1"
+
 LOCAL_BACKENDS = {BACKEND_OLLAMA, BACKEND_VLLM, BACKEND_LM_STUDIO}
 
 CREDENTIAL_SOURCE_API_KEY_ENV = "api_key_env"
@@ -128,6 +130,8 @@ def provider_seam_supported_for_runtime(seam: ProviderSeam) -> tuple[bool, str |
         return False, _unsupported_runtime_message(seam)
     if seam.provider_name == "codex":
         if seam.backend == BACKEND_DIRECT_HTTP and seam.credential_source == CREDENTIAL_SOURCE_API_KEY_ENV:
+            return True, None
+        if seam.backend == BACKEND_VENDOR_CLI and seam.credential_source == CREDENTIAL_SOURCE_VENDOR_CLI:
             return True, None
         return False, _unsupported_runtime_message(seam)
     if seam.provider_name == "local":
@@ -378,7 +382,9 @@ def _unsupported_runtime_message(seam: ProviderSeam) -> str:
         return (
             f"Provider {seam.provider_name!r} is configured for backend={seam.backend!r} and "
             f"credential_source={seam.diagnostic_credential_source!r}, but that seam is not implemented yet. "
-            f"Use backend={BACKEND_DIRECT_HTTP!r} with credential_source={CREDENTIAL_SOURCE_API_KEY_ENV!r} for now."
+            f"Supported Codex seams are backend={BACKEND_DIRECT_HTTP!r} with "
+            f"credential_source={CREDENTIAL_SOURCE_API_KEY_ENV!r}, or backend={BACKEND_VENDOR_CLI!r} "
+            f"with credential_source={CREDENTIAL_SOURCE_VENDOR_CLI!r}."
         )
     if seam.provider_name == "local":
         return "Supported local backends are: ollama, vllm, lm_studio."

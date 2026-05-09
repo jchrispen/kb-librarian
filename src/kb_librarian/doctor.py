@@ -27,7 +27,13 @@ from kb_librarian.notes import read_note
 from kb_librarian.paths import DIRECTORIES, LOG_FILES, REVIEW_STATE_FILE, ROOT_FILES, config_path
 from kb_librarian.privacy import is_cloud_provider
 from kb_librarian.provider_seams import BACKEND_LM_STUDIO, BACKEND_OLLAMA, BACKEND_VLLM
-from kb_librarian.providers import claude_cli_status, local_provider_status, operation_routes, provider_runtime_support
+from kb_librarian.providers import (
+    claude_cli_status,
+    codex_cli_status,
+    local_provider_status,
+    operation_routes,
+    provider_runtime_support,
+)
 from kb_librarian.retrieval import embedding_seam_status
 from kb_librarian.review import STATE_VERSION, ReviewStateError, validate_review_item
 from kb_librarian.search_index import load_backend, query_candidates
@@ -863,25 +869,40 @@ def _check_provider_routes(
                         )
                     )
         elif provider_name == "codex":
-            api_key_env = seam.api_key_env or "OPENAI_API_KEY"
-            if not env.get(api_key_env):
+            if seam.backend == "vendor_cli":
+                command = seam.cli_command or "codex"
+                status = codex_cli_status(command, env=env)
+                severity = "ok" if status.authenticated else "warn"
+                if not status.available and status.code in {"missing_command", "command_error"}:
+                    severity = "error"
                 findings.append(
                     DoctorFinding(
                         "Providers",
-                        "warn",
-                        "codex-provider-api-key-unset",
-                        f"Environment variable {api_key_env} is not set for backend={seam.backend} credential_source={seam.diagnostic_credential_source}.",
+                        severity,
+                        f"codex-cli-{status.code}",
+                        status.message,
                     )
                 )
             else:
-                findings.append(
-                    DoctorFinding(
-                        "Providers",
-                        "ok",
-                        "codex-provider-credentials",
-                        f"Codex provider credential environment variable {api_key_env} is set for backend={seam.backend}.",
+                api_key_env = seam.api_key_env or "OPENAI_API_KEY"
+                if not env.get(api_key_env):
+                    findings.append(
+                        DoctorFinding(
+                            "Providers",
+                            "warn",
+                            "codex-provider-api-key-unset",
+                            f"Environment variable {api_key_env} is not set for backend={seam.backend} credential_source={seam.diagnostic_credential_source}.",
+                        )
                     )
-                )
+                else:
+                    findings.append(
+                        DoctorFinding(
+                            "Providers",
+                            "ok",
+                            "codex-provider-credentials",
+                            f"Codex provider credential environment variable {api_key_env} is set for backend={seam.backend}.",
+                        )
+                    )
         elif provider_name == "local":
             status = local_provider_status(provider_config, timeout_seconds=2.0)
             if not status.reachable:

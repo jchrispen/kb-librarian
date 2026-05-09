@@ -269,6 +269,19 @@ def test_validate_config_accepts_anthropic_token_env_vendor_cli_seam(tmp_path):
     validate_config(config)
 
 
+def test_validate_config_accepts_codex_vendor_cli_seam(tmp_path):
+    config = default_config(tmp_path)
+    config["providers"]["codex"] = {
+        "backend": "vendor_cli",
+        "credential_source": "vendor_cli",
+        "cli_command": "codex",
+        "base_url": "https://api.openai.com/v1",
+        "timeout_seconds": 120,
+    }
+
+    validate_config(config)
+
+
 def test_validate_config_rejects_cli_command_outside_vendor_cli(tmp_path):
     config = default_config(tmp_path)
     config["providers"]["anthropic"]["cli_command"] = "claude"
@@ -310,6 +323,27 @@ def test_validate_config_rejects_malformed_codex_provider(tmp_path):
         "timeout_seconds": 120,
     }
     with pytest.raises(ConfigError, match="credential_source='token_env'.*backend 'vendor_cli'"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["codex"] = {
+        "backend": "vendor_cli",
+        "credential_source": "vendor_cli",
+        "base_url": "https://example.test/v1",
+        "timeout_seconds": 120,
+    }
+    with pytest.raises(ConfigError, match="providers.codex.base_url must remain https://api.openai.com/v1"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["codex"] = {
+        "backend": "vendor_cli",
+        "credential_source": "vendor_cli",
+        "base_url": "https://api.openai.com/v1",
+        "organization": "org-test",
+        "timeout_seconds": 120,
+    }
+    with pytest.raises(ConfigError, match="providers.codex.organization is supported only with backend 'direct_http'"):
         validate_config(config)
 
 
