@@ -469,6 +469,25 @@ def test_provider_from_config_requires_codex_cli_binary(monkeypatch):
         )
 
 
+def test_provider_from_config_does_not_fallback_from_codex_vendor_cli_to_api_key(monkeypatch):
+    monkeypatch.setattr("kb_librarian.providers.shutil.which", lambda command: None)
+
+    with pytest.raises(ProviderError, match="Codex CLI command 'codex' was not found"):
+        provider_from_config(
+            {
+                "providers": {
+                    "codex": {
+                        "backend": "vendor_cli",
+                        "credential_source": "vendor_cli",
+                        "base_url": "https://api.openai.com/v1",
+                    }
+                }
+            },
+            "codex",
+            env={"OPENAI_API_KEY": "test-key"},
+        )
+
+
 def test_provider_from_config_builds_anthropic_vendor_cli_provider(monkeypatch):
     monkeypatch.setattr("kb_librarian.providers.shutil.which", lambda command: f"/usr/bin/{command}")
 
@@ -506,6 +525,25 @@ def test_provider_from_config_requires_anthropic_token_env_for_vendor_cli(monkey
             },
             "anthropic",
             env={},
+        )
+
+
+def test_provider_from_config_does_not_fallback_from_anthropic_token_env_to_api_key(monkeypatch):
+    monkeypatch.setattr("kb_librarian.providers.shutil.which", lambda command: f"/usr/bin/{command}")
+
+    with pytest.raises(ProviderError, match="Missing Claude Code OAuth token"):
+        provider_from_config(
+            {
+                "providers": {
+                    "anthropic": {
+                        "backend": "vendor_cli",
+                        "credential_source": "token_env",
+                        "token_env": "CLAUDE_CODE_OAUTH_TOKEN",
+                    }
+                }
+            },
+            "anthropic",
+            env={"ANTHROPIC_API_KEY": "test-key"},
         )
 
 
@@ -650,6 +688,10 @@ def test_codex_cli_provider_maps_structured_response(monkeypatch):
     command, kwargs = commands[0]
     assert result.candidates[0].title == "Codex CLI note"
     assert command[:4] == ["/usr/bin/codex", "exec", "--sandbox", "read-only"]
+    assert "--ask-for-approval" in command
+    assert "--ephemeral" in command
+    assert "--ignore-rules" in command
+    assert "--ignore-user-config" in command
     assert "--output-schema" in command
     assert kwargs["cwd"] == "/tmp/opencode"
     assert kwargs["timeout"] == 12
@@ -725,6 +767,9 @@ def test_claude_cli_provider_maps_structured_response(monkeypatch):
     command, kwargs = commands[0]
     assert result.candidates[0].title == "Claude CLI note"
     assert command[:4] == ["/usr/bin/claude", "-p", "--model", "claude-haiku-4-5"]
+    assert "--tools" in command
+    assert "--no-session-persistence" in command
+    assert "--disable-slash-commands" in command
     assert "--json-schema" in command
     assert kwargs["cwd"] == "/tmp/opencode"
     assert kwargs["timeout"] == 12
@@ -964,6 +1009,53 @@ def test_claude_cli_status_reports_login_required(monkeypatch):
     assert status.available is True
     assert status.authenticated is False
     assert status.code == "login_required"
+
+
+def test_claude_cli_status_scrubs_secret_output(monkeypatch):
+    monkeypatch.setattr("kb_librarian.providers.shutil.which", lambda command: "/usr/bin/claude")
+
+    def fake_run(command, **kwargs):  # noqa: ANN001
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout='authorization: Bearer secret-token-value',
+            stderr='CLAUDE_CODE_OAUTH_TOKEN=super-secret',
+        )
+
+    monkeypatch.setattr("kb_librarian.providers.subprocess.run", fake_run)
+
+    status = claude_cli_status("claude", env={})
+
+    assert status.code == "auth_check_failed"
+    assert "secret-token-value" not in status.message
+    assert "super-secret" not in status.message
+    assert "[REDACTED]" in status.message
+
+
+def test_claude_cli_provider_error_scrubs_secret_output(monkeypatch):
+    def fake_run(command, **kwargs):  # noqa: ANN001
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout='authorization: Bearer secret-token-value',
+            stderr='refresh_token=super-secret',
+        )
+
+    monkeypatch.setattr("kb_librarian.providers.subprocess.run", fake_run)
+
+    provider = ClaudeCliProvider(
+        command_path="/usr/bin/claude",
+        credential_source="vendor_cli",
+        token_env=None,
+    )
+
+    with pytest.raises(ProviderError) as exc_info:
+        provider.synthesize_context(task="x", selected_notes=[], model="claude-haiku-4-5")
+
+    message = str(exc_info.value)
+    assert "secret-token-value" not in message
+    assert "super-secret" not in message
+    assert "[REDACTED]" in message
 
 
 def test_claude_cli_status_reports_missing_command(monkeypatch):

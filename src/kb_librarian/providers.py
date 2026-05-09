@@ -2348,7 +2348,25 @@ def _resolve_cli_command_path(command: str) -> str | None:
 
 def _combined_subprocess_output(stdout: str | None, stderr: str | None) -> str:
     parts = [text.strip() for text in (stdout, stderr) if isinstance(text, str) and text.strip()]
-    return "\n".join(parts)
+    return _scrub_subprocess_output("\n".join(parts))
+
+
+def _scrub_subprocess_output(output: str) -> str:
+    scrubbed = output
+    patterns = (
+        (re.compile(r"(?i)\b(bearer\s+)([^\s\"']+)"), r"\1[REDACTED]"),
+        (
+            re.compile(r'(?i)("?(?:access_token|refresh_token|id_token|api_key|token|secret|password|cookie|authorization)"?\s*[:=]\s*"?)([^\"\s,}]+)'),
+            r"\1[REDACTED]",
+        ),
+        (
+            re.compile(r"(?i)\b([A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD|COOKIE|AUTH)[A-Z0-9_]*=)([^\s\"']+)"),
+            r"\1[REDACTED]",
+        ),
+    )
+    for pattern, replacement in patterns:
+        scrubbed = pattern.sub(replacement, scrubbed)
+    return scrubbed
 
 
 def _classify_claude_cli_auth_failure(output: str) -> str:

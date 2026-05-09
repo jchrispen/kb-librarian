@@ -192,6 +192,8 @@ Provider retries are configurable under `providers.retry` (`max_attempts`, `base
 
 Anthropic `backend: vendor_cli` and Codex `backend: vendor_cli` are implemented for supported vendor CLI delegation. Direct HTTP `credential_source: command` and unsupported auth/endpoint combinations still fail explicitly instead of silently emulating API-key behavior.
 
+Configured auth is authoritative: the selected `backend` and `credential_source` decide which credentials are used, ambient credentials for other modes are ignored, and missing selected auth fails explicitly instead of silently falling back.
+
 Privacy controls are configured under `privacy`. Set `cloud_llm_allowed: false` to block Anthropic/Codex provider attempts, use `blocked_topics` to block cloud calls for selected note topics when topic context is available, and use `redact_patterns` to redact provider-bound payload text without mutating stored KB artifacts.
 
 For offline development or tests, the codebase also supports a deterministic `mock` provider, but it is not the default config written by `kb init`.

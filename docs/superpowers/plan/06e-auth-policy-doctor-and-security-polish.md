@@ -2,7 +2,7 @@
 
 Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
 
-Status: Pending
+Status: Complete
 
 ## Goal
 
@@ -74,3 +74,24 @@ Harden provider auth behavior after the new backends and vendor CLI delegation m
 
 - New provider families beyond those added earlier in Phase 6.
 - Non-auth-related product changes.
+
+## Completion Record
+
+Completed on 2026-05-09.
+
+Implemented files:
+
+- `src/kb_librarian/providers.py`
+- `src/kb_librarian/doctor.py`
+- `tests/test_providers.py`
+- `tests/test_doctor.py`
+- `README.md`
+- `docs/configuration.md`
+- `docs/troubleshooting.md`
+- `docs/superpowers/plan/06-provider-backends-and-account-auth.md`
+- `docs/superpowers/plan/06e-auth-policy-doctor-and-security-polish.md`
+
+Verification:
+
+- `python3 -m pytest --override-ini addopts='' tests/test_providers.py tests/test_doctor.py -q` - passed, 67 passed.
+- `python3 -m pytest --override-ini addopts='' tests/test_config.py tests/test_cli.py tests/test_providers.py tests/test_doctor.py -q` - passed, 118 passed.

@@ -286,6 +286,12 @@ Cloud providers also accept explicit seam fields:
 
 Existing API-key configs remain valid when these fields are absent. Anthropic and Codex `vendor_cli` delegation are implemented in this release. Direct-http `credential_source: command` and unsupported auth/endpoint combinations still fail explicitly instead of silently falling back to API-key behavior.
 
+Credential precedence is config-first and deterministic:
+
+- `backend` and `credential_source` select one auth path for a provider.
+- Ambient credentials for other auth modes are ignored. For example, `backend: vendor_cli` does not use `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, and Anthropic `credential_source: token_env` does not fall back to `claude auth login`.
+- When the selected auth material is missing or invalid, KB Librarian fails explicitly and `kb doctor` reports the active seam plus the missing CLI, login, token, API key, endpoint, or reachability issue.
+
 `providers.retry` controls bounded retry/backoff behavior for provider-backed operations:
 
 - `max_attempts`: maximum total attempts per provider call (including the first attempt)

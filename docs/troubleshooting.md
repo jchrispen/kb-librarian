@@ -38,6 +38,8 @@ For deterministic offline development or tests, reconfigure the provider manuall
 
 Anthropic vendor CLI delegation uses the installed `claude` CLI in non-interactive print mode.
 
+The configured seam is authoritative. If `providers.anthropic` is set to `backend: vendor_cli`, KB Librarian will not fall back to `ANTHROPIC_API_KEY`. If it is set to `credential_source: token_env`, it will not fall back to a local `claude auth login` session.
+
 Check these in order:
 
 1. Confirm the configured Claude CLI command exists, usually `claude`
@@ -68,6 +70,8 @@ Codex-compatible routes support two auth modes:
 
 - `backend: direct_http` with `providers.codex.api_key_env` and `providers.codex.base_url`
 - `backend: vendor_cli` with the installed `codex` CLI and a ChatGPT login managed by Codex itself
+
+The configured seam is authoritative. If `providers.codex` is set to `backend: vendor_cli`, KB Librarian will not fall back to `OPENAI_API_KEY` even if that environment variable is present.
 
 Check these in order:
 

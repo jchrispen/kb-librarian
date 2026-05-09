@@ -833,6 +833,15 @@ def _check_provider_routes(
                             f"Environment variable {api_key_env} is not set for backend={seam.backend} credential_source={seam.diagnostic_credential_source}.",
                         )
                     )
+                else:
+                    findings.append(
+                        DoctorFinding(
+                            "Providers",
+                            "ok",
+                            "anthropic-provider-credentials",
+                            f"Anthropic provider credential environment variable {api_key_env} is set for backend={seam.backend}.",
+                        )
+                    )
             elif seam.backend == "vendor_cli":
                 command = seam.cli_command or "claude"
                 if seam.credential_source == "token_env":

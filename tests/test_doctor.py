@@ -302,6 +302,19 @@ def test_doctor_reports_codex_credentials_when_routed(tmp_path):
     assert "backend=direct_http credential_source=api_key_env" in rendered
 
 
+def test_doctor_reports_anthropic_credentials_when_routed(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    report = run_doctor(tmp_path, env={"ANTHROPIC_API_KEY": "test-key"})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 0
+    assert "anthropic-provider-credentials" in rendered
+    assert "backend=direct_http credential_source=api_key_env" in rendered
+
+
 def test_doctor_reports_anthropic_vendor_cli_login_status(tmp_path, monkeypatch):
     initialize_data_dir(tmp_path)
     config = default_config(tmp_path)
@@ -329,6 +342,60 @@ def test_doctor_reports_anthropic_vendor_cli_login_status(tmp_path, monkeypatch)
     assert "provider-seam" in rendered
     assert "anthropic-cli-login_required" in rendered
     assert "backend=vendor_cli credential_source=vendor_cli" in rendered
+
+
+def test_doctor_reports_anthropic_vendor_cli_missing_command(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    config["providers"]["anthropic"] = {
+        "backend": "vendor_cli",
+        "credential_source": "vendor_cli",
+    }
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    monkeypatch.setattr(
+        "kb_librarian.doctor.claude_cli_status",
+        lambda *args, **kwargs: ClaudeCliStatus(
+            available=False,
+            authenticated=False,
+            code="missing_command",
+            message="Claude Code CLI command 'claude' was not found.",
+            command_path=None,
+        ),
+    )
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 1
+    assert "anthropic-cli-missing_command" in rendered
+
+
+def test_doctor_reports_anthropic_vendor_cli_expired_login(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    config["providers"]["anthropic"] = {
+        "backend": "vendor_cli",
+        "credential_source": "vendor_cli",
+    }
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    monkeypatch.setattr(
+        "kb_librarian.doctor.claude_cli_status",
+        lambda *args, **kwargs: ClaudeCliStatus(
+            available=True,
+            authenticated=False,
+            code="expired",
+            message="Claude Code login appears expired. Run `claude auth login` again and retry.",
+            command_path="/usr/bin/claude",
+        ),
+    )
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 0
+    assert "anthropic-cli-expired" in rendered
 
 
 def test_doctor_reports_anthropic_vendor_cli_token_env_warning(tmp_path):
@@ -379,6 +446,66 @@ def test_doctor_reports_codex_vendor_cli_login_status(tmp_path, monkeypatch):
     assert "provider-seam" in rendered
     assert "codex-cli-login_required" in rendered
     assert "backend=vendor_cli credential_source=vendor_cli" in rendered
+
+
+def test_doctor_reports_codex_vendor_cli_missing_command(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    config["providers"]["codex"] = {
+        "backend": "vendor_cli",
+        "credential_source": "vendor_cli",
+        "base_url": "https://api.openai.com/v1",
+    }
+    for operation in config["operations"]:
+        config["operations"][operation] = {"provider": "codex", "model": "gpt-5-codex"}
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    monkeypatch.setattr(
+        "kb_librarian.doctor.codex_cli_status",
+        lambda *args, **kwargs: CodexCliStatus(
+            available=False,
+            authenticated=False,
+            code="missing_command",
+            message="Codex CLI command 'codex' was not found.",
+            command_path=None,
+        ),
+    )
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 1
+    assert "codex-cli-missing_command" in rendered
+
+
+def test_doctor_reports_codex_vendor_cli_expired_login(tmp_path, monkeypatch):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    config["providers"]["codex"] = {
+        "backend": "vendor_cli",
+        "credential_source": "vendor_cli",
+        "base_url": "https://api.openai.com/v1",
+    }
+    for operation in config["operations"]:
+        config["operations"][operation] = {"provider": "codex", "model": "gpt-5-codex"}
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+
+    monkeypatch.setattr(
+        "kb_librarian.doctor.codex_cli_status",
+        lambda *args, **kwargs: CodexCliStatus(
+            available=True,
+            authenticated=False,
+            code="expired",
+            message="Codex CLI login appears expired. Run `codex login` again and retry.",
+            command_path="/usr/bin/codex",
+        ),
+    )
+
+    report = run_doctor(tmp_path, env={})
+    rendered = render_doctor_report(report)
+
+    assert report.error_count == 0
+    assert "codex-cli-expired" in rendered
 
 
 def test_doctor_warns_when_privacy_blocks_cloud_routes(tmp_path):
