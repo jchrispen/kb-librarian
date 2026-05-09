@@ -206,7 +206,7 @@ For offline development or tests, the codebase also supports a deterministic `mo
 - [Command Reference](docs/command-reference.md)
 - [Release Guide](docs/releasing.md)
 - [Troubleshooting](docs/troubleshooting.md)
-- [Canonical Design Spec](docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md)
+- [Canonical Design Spec](docs/superpowers/specs/kb-librarian-agent-first-design.md)
 
 ## Development Notes
 

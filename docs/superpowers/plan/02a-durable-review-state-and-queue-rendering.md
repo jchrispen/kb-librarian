@@ -1,6 +1,6 @@
 # Phase 02a - Durable Review State and Queue Rendering
 
-Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
+Canonical spec: `docs/superpowers/specs/kb-librarian-agent-first-design.md`
 
 Status: Complete
 Completed: 2026-05-06

@@ -4,12 +4,12 @@
 
 This repo contains planning and design material for KB Librarian.
 
-- Canonical design spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
+- Canonical design spec: `docs/superpowers/specs/kb-librarian-agent-first-design.md`
 - Implementation plans: `docs/superpowers/plan/`
 
 When implementing or extending KB Librarian, read the canonical design spec for product behavior, architecture, data model, and CLI contracts. Use the implementation plan files for sequencing and task boundaries. If a plan and the spec appear to conflict, treat the spec as the source of truth and update the plan or ask for clarification before implementing.
 
-The Phase 5+ items in the spec are deferred backlog. Do not create or implement Phase 5 work unless explicitly requested.
+Phases 1–6 are shipped. The spec's "Deferred backlog" (currently: embedding-based retrieval, MCP wrapper, TUI/web review, multi-machine helpers, interactive cloud-call confirmation) is not in scope unless explicitly requested.
 
 ## Milestone Implementation
 

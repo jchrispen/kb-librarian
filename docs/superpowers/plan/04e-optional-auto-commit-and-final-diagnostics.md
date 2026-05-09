@@ -1,6 +1,6 @@
 # Phase 04e - Optional Auto-Commit and Final Diagnostics
 
-Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
+Canonical spec: `docs/superpowers/specs/kb-librarian-agent-first-design.md`
 
 Status: Complete
 Completed: 2026-05-07

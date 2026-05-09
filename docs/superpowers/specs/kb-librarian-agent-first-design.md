@@ -1,7 +1,6 @@
 # KB Librarian — Agent-First Design Spec
 
-**Date:** 2026-05-04  
-**Status:** Revised design direction; ready for MVP implementation planning  
+**Status:** Phases 1–6 implemented; this spec describes the shipped system.  
 **Tool repo:** `/mnt/c/workspace/source/internal/kb-librarian/`  
 **Default data repo:** `~/.kb/.library`, next to the default config at `~/.kb/config.yaml`  
 **Design thesis:** Agent-accessible knowledge artifact, published as files, inspectable by humans when needed.
@@ -114,12 +113,14 @@ kb/                                          # data repo (git)
 ### 2.3 Components
 
 1. **`kb` CLI** — pip-installable Python package and universal agent contract.
-2. **Provider abstraction** — `LLMProvider` protocol with configurable adapters. Anthropic first; OpenAI/Ollama later.
+2. **Provider abstraction** — `LLMProvider` protocol with pluggable backends and credential sources. Implemented adapters: Anthropic (direct HTTP and Claude Code CLI delegation), Codex (OpenAI-compatible direct HTTP and Codex CLI delegation), local backends (Ollama, vLLM, LM Studio), and a deterministic mock for tests. Per-operation routing with bounded fallback chains and shared retry/backoff policy. See §13.
 3. **Librarian engine** — orchestrates parsing, classification, extraction, integration, review proposals, and compaction.
-4. **Retrieval engine** — powers `search`, `context`, and `explore` using generated indexes and note metadata.
-5. **Index builder** — regenerates `INDEX.md`, topic indexes, backlinks, and local lexical index from notes.
-6. **Review queue** — bounded, actionable curation workflow with stable review item IDs.
-7. **Agent integrations** — thin wrappers or preamble entries that tell each tool how to call `kb`.
+4. **Retrieval engine** — powers `search`, `context`, and `explore` using generated indexes and note metadata. The candidate-source and ranker interfaces include an embedding seam reserved for a later phase; lexical retrieval is the default and only enabled implementation.
+5. **Index builder** — regenerates `INDEX.md`, paginated topic indexes, backlinks, and local lexical index from notes.
+6. **Review queue** — bounded, actionable curation workflow with stable review item IDs and a JSON source-of-truth backing the rendered markdown queues.
+7. **Privacy layer** — provider-payload redaction and cloud-call gating applied before LLM calls. Notes on disk are never mutated by privacy controls. See §14.
+8. **Diagnostics** — `kb doctor` runs layout, schema, index, review-state, provider, auth, and recovery checks; offline `--self-test` exercises ingest → reindex → search through the mock provider.
+9. **Agent integrations** — thin wrappers or preamble entries that tell each tool how to call `kb`.
 
 ### 2.4 Primary data flow
 
@@ -491,12 +492,34 @@ Returns summaries by default, not full bodies.
 
 ### 4.7 Configuration
 
+The default config produced by `kb init` is:
+
 ```yaml
 data_dir: ~/.kb/.library
 
 providers:
   anthropic:
+    backend: direct_http
+    credential_source: api_key_env
     api_key_env: ANTHROPIC_API_KEY
+  codex:
+    backend: direct_http
+    credential_source: api_key_env
+    api_key_env: OPENAI_API_KEY
+    base_url: https://api.openai.com/v1
+    timeout_seconds: 120
+  local:
+    backend: ollama          # ollama | vllm | lm_studio
+    base_url: http://127.0.0.1:11434
+    timeout_seconds: 120
+  retry:
+    max_attempts: 3
+    base_delay_seconds: 0.25
+    max_delay_seconds: 2.0
+    jitter_seconds: 0.1
+  policy:
+    default_provider: anthropic
+    fallback: {}             # per-operation fallback chains, see §13.3
 
 operations:
   extract:    { provider: anthropic, model: claude-sonnet-4-6 }
@@ -511,7 +534,11 @@ retrieval:
   explore_budget_tokens: 3000
   index_token_cap: 5000
   lexical_index: true
-  embeddings: false
+  embeddings: false                    # reserved seam; lexical is the only enabled source
+  embedding_index_path: .kb/embeddings.sqlite
+  embedding_provider: null
+  embedding_model: null
+  embedding_dimensions: null
   title_weight: 5
   summary_weight: 4
   retrieval_phrase_weight: 4
@@ -526,6 +553,8 @@ ingest:
 indexes:
   topic_sort: alphabetical
   top_level_min_notes: 1
+  topic_page_size: 50
+  top_level_page_size: 100
 
 review:
   stale_after_days: 180
@@ -536,16 +565,24 @@ review:
 
 git:
   auto_commit: false
+  commit_ingests: true
+  commit_reviews: true
+  commit_reindexes: false
+  commit_topic_reorganizations: true
+  allow_unrelated_changes: false
   require_clean_worktree_for_rewrites: true
 
 privacy:
   cloud_llm_allowed: true
   blocked_topics: []
   redact_patterns: []
+  require_confirmation_for_cloud_llm: false
 
 hooks:
   session_start_ingest: false
 ```
+
+Provider sections accept additional keys beyond the defaults shown above to switch backends or credential sources — for example `backend: vendor_cli` with `credential_source: vendor_cli` to delegate to the Claude Code or Codex CLI, or `backend: vllm` / `backend: lm_studio` for alternative local servers. See §13 for the full provider/auth model.
 
 ---
 
@@ -1089,11 +1126,71 @@ Generated indexes should generally not create noisy commits unless desired.
 
 ---
 
-## 13. Privacy and provider controls
+## 13. Provider backends and account auth
 
-Privacy is not an MVP focus, but the architecture should preserve the option.
+The provider abstraction is split into three orthogonal seams so a single config can describe a wide range of deployments without changing call sites.
 
-### 13.1 Config seam
+### 13.1 Backend
+
+The transport that actually performs an inference call. Supported values:
+
+- `direct_http` — first-party HTTP API (Anthropic, OpenAI-compatible Codex)
+- `vendor_cli` — delegate to a locally installed vendor CLI (`claude -p`, `codex exec`)
+- `ollama` — local Ollama server
+- `vllm` — local vLLM server (OpenAI-compatible transport reuse)
+- `lm_studio` — local LM Studio server (OpenAI-compatible transport reuse)
+- `mock` — deterministic in-process provider for tests
+
+### 13.2 Credential source
+
+How the runtime obtains an API key, bearer token, or session for the chosen backend:
+
+- `api_key_env` — read an API key from a named environment variable (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)
+- `token_env` — read a vendor session token from a named environment variable (e.g. `CLAUDE_CODE_OAUTH_TOKEN`)
+- `vendor_cli` — delegate authentication entirely to a logged-in vendor CLI (`claude auth login`, `codex login`)
+- `command` — run a configured command and use its stdout as the credential
+
+Backends and credential sources combine to describe specific deployments. Examples:
+
+- Anthropic API key: `backend: direct_http`, `credential_source: api_key_env`, `api_key_env: ANTHROPIC_API_KEY`
+- Claude subscription via CLI: `backend: vendor_cli`, `credential_source: vendor_cli`, optionally `cli_command: claude`
+- Codex with bearer-token env var: `backend: direct_http`, `credential_source: token_env`, `token_env: OPENAI_API_KEY`
+- Local Ollama: `backend: ollama`, `base_url: http://127.0.0.1:11434` (no credential source)
+- Local vLLM/LM Studio: `backend: vllm` or `backend: lm_studio` with appropriate `base_url`
+
+### 13.3 Per-operation routing and fallback
+
+Each LLM operation (`extract`, `compact`, `classify`, `integrate`, `synthesize`) is independently routed to a provider and model in `operations.*`. Bounded fallback chains can be declared under `providers.policy.fallback`:
+
+```yaml
+providers:
+  policy:
+    default_provider: anthropic
+    fallback:
+      synthesize: [anthropic, codex, local]
+```
+
+Provider selection is deterministic and explainable. The doctor reports the resolved provider for each operation and any invalid policy graphs. Fallback attempts are bounded and logged so failures show the full attempted sequence.
+
+### 13.4 Retry policy
+
+Transient provider errors (timeouts, rate limits, 5xx) are retried with exponential backoff under `providers.retry`. Permanent errors (auth failures, 4xx other than 429, malformed responses) are non-retriable. Retry attempts are written to `.kb/errors.log` with operation IDs so a failure trace can be reconstructed after the fact.
+
+### 13.5 Vendor-CLI delegation safety
+
+Account-login backends shell out to the vendor CLI in completion-only mode (no tool use, bounded timeouts). The KB never grants the vendor CLI write access to the artifact. Detection of missing or expired logins surfaces in `kb doctor` with explicit remediation steps.
+
+### 13.6 Secret scrubbing
+
+Anything that could carry a credential — log entries, doctor output, error messages, and rendered subprocess invocations — is run through a redaction filter that masks API keys, bearer tokens, and OAuth artifacts. Secrets must not appear in `.kb/errors.log`, `kb doctor` output, or commit messages.
+
+---
+
+## 14. Privacy and redaction
+
+Privacy controls are shipped and validated. Notes on disk are never mutated by privacy controls — redaction applies only to the payloads sent to providers.
+
+### 14.1 Config
 
 ```yaml
 privacy:
@@ -1103,21 +1200,26 @@ privacy:
   require_confirmation_for_cloud_llm: false
 ```
 
-### 13.2 Future controls
+### 14.2 Behavior
 
-Potential later features:
+- **`cloud_llm_allowed`** — when `false`, attempts to call any cloud provider raise an error and surface in `kb doctor`. Local backends remain available.
+- **`blocked_topics`** — list of topics that may not be sent to cloud providers. A provider call carrying notes from a blocked topic is rejected before the request leaves the machine.
+- **`redact_patterns`** — list of regex patterns. Matches are replaced with `[REDACTED]` in provider payloads (recursively across structured fields). Patterns are not applied to notes or indexes on disk.
+- **`require_confirmation_for_cloud_llm`** — config seam validated by `kb doctor`. The current implementation does not provide an interactive prompt; a future iteration may wire this through.
 
-- block cloud LLM calls for selected topics
-- redact known sensitive patterns
-- show LLM payload before sending
-- use local providers for sensitive notes
-- mark notes as local-only
+### 14.3 Future controls
+
+Potential later features (not yet implemented):
+
+- show LLM payload before sending (interactive confirmation flow)
+- mark individual notes as local-only and exclude them from cloud calls
+- per-operation privacy overrides
 
 ---
 
-## 14. Testing strategy
+## 15. Testing strategy
 
-### 14.1 Deterministic tests
+### 15.1 Deterministic tests
 
 Full unit coverage for:
 
@@ -1134,7 +1236,7 @@ Full unit coverage for:
 - CLI argument parsing
 - lock/state handling
 
-### 14.2 Mock-provider tests
+### 15.2 Mock-provider tests
 
 Scripted LLM responses for:
 
@@ -1146,7 +1248,7 @@ Scripted LLM responses for:
 - context synthesis
 - explore synthesis
 
-### 14.3 Golden corpus
+### 15.3 Golden corpus
 
 A small real corpus should validate:
 
@@ -1161,7 +1263,7 @@ The core test question:
 
 > Does `kb context` help an agent do better work with fewer tokens?
 
-### 14.4 Manual smoke test
+### 15.4 Manual smoke test
 
 ```text
 kb init
@@ -1176,9 +1278,11 @@ kb review
 
 ---
 
-## 15. Build phases
+## 16. Build phases
 
-### Phase 1 — Agent-first walking skeleton
+Phases 1–6 are implemented. The historical breakdown is preserved here so plan files and changelogs remain interpretable.
+
+### Phase 1 — Agent-first walking skeleton (shipped)
 
 Goal: prove that an agent can retrieve useful task context.
 
@@ -1201,7 +1305,7 @@ Definition of done:
 
 > Add 20–50 real notes, call `kb context` from an agent, and observe better coding/design help with lower token usage.
 
-### Phase 2 — Daily-use ergonomics
+### Phase 2 — Daily-use ergonomics (shipped)
 
 1. Better `kb review` commands with stable IDs.
 2. `kb explore`.
@@ -1215,7 +1319,7 @@ Definition of done:
 
 > The KB becomes useful in normal agent sessions and review stays under 5 minutes.
 
-### Phase 3 — Long-term hygiene
+### Phase 3 — Long-term hygiene (shipped)
 
 1. Compaction.
 2. Stale-note flagging.
@@ -1225,7 +1329,7 @@ Definition of done:
 6. INDEX pagination.
 7. Hierarchical topics and reorganization commands.
 
-### Phase 4 — Robustness and polish
+### Phase 4 — Robustness and polish (shipped)
 
 1. Concurrent-ingest lockfile and resume.
 2. Retry/backoff.
@@ -1234,19 +1338,35 @@ Definition of done:
 5. Session-start hooks and cron templates.
 6. Optional auto-commit policy.
 
-### Phase 5+ — Deferred
+### Phase 5 — Provider expansion and local-first (shipped)
 
-- Additional LLM providers.
-- Local provider support.
-- Embedding-based retrieval.
-- MCP server wrapper if clearly better than shelling out.
+1. Local Ollama provider.
+2. Codex (OpenAI-compatible) provider.
+3. Per-operation provider policy and bounded fallback chains.
+4. Embedding retrieval seam (interfaces only; lexical remains the only enabled source).
+5. Privacy and redaction controls (see §14).
+
+### Phase 6 — Provider backends and account auth (shipped)
+
+1. Provider backend and credential-source seams (see §13).
+2. Additional local backends: vLLM and LM Studio.
+3. Anthropic account-login auth via Claude Code CLI.
+4. Codex account-login auth via Codex CLI.
+5. Auth policy precedence, doctor coverage for auth state, and secret scrubbing across logs and diagnostics.
+
+### Deferred backlog
+
+Not implemented and not currently scheduled:
+
+- Embedding-based retrieval (the seam exists; ranking and index build do not).
+- MCP server wrapper, if it proves clearly better than shelling out.
 - TUI/web review interface.
-- Privacy/redaction tooling.
 - Multi-machine conflict helpers.
+- Interactive cloud-call confirmation prompt (the config seam exists).
 
 ---
 
-## 16. Success criteria
+## 17. Success criteria
 
 The design is working when:
 
@@ -1263,6 +1383,8 @@ The design is working when:
 
 ## Appendix A — Key changes from the earlier design
 
+These were the framing changes in the 2026-05-04 revision that established the agent-first direction:
+
 1. Reframed the system from personal/team markdown KB to agent context substrate.
 2. Changed the core principle from “the store is files” to “files are the durable published artifact.”
 3. Made `kb context` a Phase 1 command and primary agent interface.
@@ -1277,3 +1399,14 @@ The design is working when:
 12. Added privacy/provider seams without making them MVP scope.
 13. Reduced early emphasis on hierarchy, PDF parsing, and compaction.
 14. Changed the MVP success test to whether agents do better work with fewer tokens.
+
+## Appendix B — Updates after Phase 4
+
+The original spec scoped Phases 1–4 in detail and listed Phase 5+ as a deferred backlog. Subsequent implementation pulled most of that backlog into shipped work, and this spec has been updated in place to describe the resulting system. Notable changes from the original 2026-05-04 revision:
+
+1. Local provider support (Ollama) and a Codex (OpenAI-compatible) provider became Phase 5.
+2. Privacy and redaction controls became Phase 5e and are now described in §14 as shipped behavior, not future work.
+3. A Phase 6 was added for provider backend and credential-source seams, additional local backends (vLLM, LM Studio), and account-login auth via the Claude Code and Codex CLIs. §13 documents the resulting model.
+4. `§4.7` was expanded to reflect the real default config produced by `kb init`, including `providers.{anthropic,codex,local,retry,policy}`, paginated indexes, and the embedding seam keys.
+5. Embedding-based retrieval remains deferred — only the seam interfaces exist; lexical retrieval is still the only enabled candidate source.
+6. MCP server wrapper, TUI/web review interface, multi-machine helpers, and the interactive cloud-call confirmation flow remain deferred.

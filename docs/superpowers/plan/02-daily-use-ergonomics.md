@@ -1,6 +1,6 @@
 # Phase 02 - Daily-Use Ergonomics
 
-Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
+Canonical spec: `docs/superpowers/specs/kb-librarian-agent-first-design.md`
 
 ## Goal
 

@@ -1,6 +1,6 @@
 # Phase 06e - Auth Policy, Doctor, and Security Polish
 
-Canonical spec: `docs/superpowers/specs/2026-05-04-kb-librarian-agent-first-design.md`
+Canonical spec: `docs/superpowers/specs/kb-librarian-agent-first-design.md`
 
 Status: Complete
 
