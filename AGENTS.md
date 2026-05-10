@@ -50,18 +50,9 @@ Each milestone must be:
 
 Avoid large omnibus task lists. Split work by runnable increments, not by abstract subsystem. Do not create implementation code unless explicitly requested.
 
-## Repo Command Specs
-
-For repo-local slash-style requests, use `docs/commands/` as the command-spec directory.
-
-- Supported command specs live at `docs/commands/release/SKILL.md`, `docs/commands/milestone-ship/SKILL.md`, `docs/commands/coverage/SKILL.md`, and `docs/commands/kb/SKILL.md`.
-- When a user invokes one of those commands, read only the requested `docs/commands/<name>/SKILL.md` file first instead of loading the whole directory.
-- Treat these `SKILL.md` files as repo command playbooks, not as global standing instructions or native runtime skills.
-- Instruction precedence remains: direct user request, then `AGENTS.md`, then the selected command spec, then other repo docs.
-- Keep command specs short, procedural, and heavy on file references rather than duplicated design detail.
+## Shared Agent Skills
 
 For shared agent skills, see [`.agents/agent-skills/AGENTS.md`](.agents/agent-skills/AGENTS.md).
 
 - For OpenCode, Codex CLI, and other `AGENTS.md`-aware agents, treat `.agents/agent-skills/AGENTS.md` as an active skill index, not a passive reference.
 - Before planning or editing, if the task plausibly matches one of those shared skill descriptions, read the matching `.agents/agent-skills/skills/<name>/SKILL.md` first and follow any referenced files it points to.
-- Prefer repo-local command specs in `docs/commands/` when the user is invoking a repo command; otherwise use the shared skills when they match.
