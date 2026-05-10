@@ -4,8 +4,8 @@
 
 This repo contains planning and design material for KB Librarian.
 
-- Canonical design spec: `docs/superpowers/specs/kb-librarian-agent-first-design.md`
-- Implementation plans: `docs/superpowers/plan/`
+- Canonical design spec: `docs/specs/kb-librarian.md`
+- Implementation plans: `.agents/workflow/plans/`
 
 When implementing or extending KB Librarian, read the canonical design spec for product behavior, architecture, data model, and CLI contracts. Use the implementation plan files for sequencing and task boundaries. If a plan and the spec appear to conflict, treat the spec as the source of truth and update the plan or ask for clarification before implementing.
 
@@ -25,14 +25,11 @@ Commit implementation work in regular, meaningful increments during the mileston
 
 ## Milestone Status Maintenance
 
-When a milestone is completed (for example `01a`), keep its plan file as the historical completion record and update status in place.
+When a milestone is completed, compact the plan using the `personal-workflow` skill's compact-plan flow: extract decisions and notable outcomes into `docs/adrs/` or `docs/notes/`, then delete the plan folder. The durable record lives in those extracted artifacts, not in the plan itself.
 
-- Mark the milestone plan with explicit completion metadata (at minimum: `Status: Complete` and completion date).
-- Add or maintain a short completion record listing implemented files and verification commands/results.
-- Do not delete or repurpose completed milestone plan files.
-- For subsequent work, treat completed milestones as locked historical context and build forward from the next milestone unless fixing a confirmed regression.
-- If completion details change (for example, additional verification), append/update the completion record rather than removing prior context.
-- Also update the parent phase plan milestone table/order (for example `01-agent-first-walking-skeleton.md`) in the same change so `Complete`/`Next`/`Pending` states stay synchronized.
+- Before compacting, ensure the extracted ADR or note captures: what was built, key decisions made, and any interfaces or data layouts that subsequent milestones depend on.
+- For subsequent work, treat completed milestones as locked historical context (readable via git history) and build forward from the next milestone unless fixing a confirmed regression.
+- Also update the parent phase plan milestone table (for example `01-agent-first-walking-skeleton.md`) in the same change so `Complete`/`Next`/`Pending` states stay synchronized.
 
 ## Implementation Planning
 
