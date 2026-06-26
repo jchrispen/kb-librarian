@@ -1,6 +1,6 @@
 # Notes Index
 
-_Last updated: 2026-05-09_
+_Last updated: 2026-06-26_
 
 ## Providers
 
@@ -9,3 +9,7 @@ _Last updated: 2026-05-09_
 ## Ingest
 
 - [ingest/pdf-html-parsing.md](ingest/pdf-html-parsing.md) — PDF and HTML parser scope limits and failure modes
+
+## References
+
+- [references/okf-format.md](references/okf-format.md) — OKF as interchange-format and visualizer reference (deferred ideas, not scoped)
