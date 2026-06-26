@@ -87,6 +87,18 @@ kb topics [--tree] [--data-dir <path>]
 
 Use `--tree` to render nested slash-delimited topics as a hierarchy. When `review/review-items.json` is available, `kb topics` and `kb topics --tree` include stale/orphan/review counts alongside note counts.
 
+## `kb graph`
+
+Build the concept graph of note-to-note references and their backlinks.
+
+```bash
+kb graph [--json] [--data-dir <path>]
+```
+
+Edges are real references only: `disputes` frontmatter entries and `[[note-id]]` wikilinks in note bodies, each resolved against known note IDs (unresolved references are dropped). Tags and topics are carried on nodes for grouping, not turned into edges. Backlinks are the inverse of these directed edges.
+
+Without `--json`, prints a summary (note/edge counts, edge types, most-referenced notes). With `--json`, prints `{nodes, edges, backlinks}` for tooling or visualization.
+
 ## `kb ingest`
 
 Ingest one markdown, text, PDF, or local HTML file, or process pending files in `raw/`.

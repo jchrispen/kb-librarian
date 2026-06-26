@@ -26,6 +26,7 @@ from kb_librarian.errors import (
     NoteValidationError,
 )
 from kb_librarian.git_auto import AutoCommitResult, GitSnapshot, capture_git_snapshot, maybe_auto_commit
+from kb_librarian.graph import build_graph, graph_to_dict, render_graph_summary
 from kb_librarian.hygiene import flag_suspect_note
 from kb_librarian.indexing import ReindexResult, group_records_for_indexing, reindex_data_dir
 from kb_librarian.init import initialize_data_dir, render_hooks_guidance, render_preamble_guidance
@@ -78,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_get_parser(subcommands)
     _add_topics_parser(subcommands)
     _add_topic_parser(subcommands)
+    _add_graph_parser(subcommands)
     _add_ingest_parser(subcommands)
     _add_review_parser(subcommands)
     _add_compact_parser(subcommands)
@@ -282,6 +284,16 @@ def _add_topic_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentP
     merge.add_argument("--as", dest="target", required=True, help="Target merged topic path.")
     merge.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
     merge.set_defaults(handler=_handle_topic_merge)
+
+
+def _add_graph_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = subcommands.add_parser(
+        "graph",
+        help="Build the concept graph (note references and backlinks).",
+    )
+    parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
+    parser.add_argument("--json", action="store_true", help="Print the graph as machine-readable JSON.")
+    parser.set_defaults(handler=_handle_graph)
 
 
 def _add_ingest_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -949,6 +961,17 @@ def _handle_topics(args: argparse.Namespace) -> int:
         print(_render_topic_tree(topics, grouped, review_counts, review_available), end="")
     else:
         print(_render_topic_list(topics, grouped, review_counts, review_available), end="")
+    return 0
+
+
+def _handle_graph(args: argparse.Namespace) -> int:
+    data_dir = resolve_data_dir(args.data_dir)
+    initialize_data_dir(data_dir)
+    graph = build_graph(data_dir)
+    if args.json:
+        print(json.dumps(graph_to_dict(graph), indent=2, sort_keys=True))
+        return 0
+    print(render_graph_summary(graph), end="")
     return 0
 
 

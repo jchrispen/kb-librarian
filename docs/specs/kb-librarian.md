@@ -16,6 +16,7 @@ A local-first knowledge base CLI for coding agents. Stores durable knowledge as 
 - `kb search` — lexical full-text search
 - `kb get` — fetch a note by ID
 - `kb topics` / `kb topic` — topic tree and per-topic note listing
+- `kb graph` — concept graph of note references (`disputes`, `[[id]]` wikilinks) and backlinks
 - `kb review` — manage the review queue (hygiene signals, compaction proposals)
 - `kb context` — high-precision task-shaped context retrieval
 - `kb explore` — broad-recall ideation retrieval
@@ -52,6 +53,7 @@ Local-first Python CLI. No server, no daemon, no network calls in the critical p
 | `config.py` | Config model, per-operation overrides, default-provider policy |
 | `search_index.py` | SQLite FTS5 index build and query |
 | `retrieval.py` | Search, context, and explore surface logic |
+| `graph.py` | Concept graph derivation (reference edges, backlinks) |
 | `ingest.py` | Ingest pipeline orchestration |
 | `parsers.py` | Format-specific parsing (markdown, text, PDF, local HTML) |
 | `ingest_recovery.py` | Checkpoint/resume, PID-stamped lock management |
