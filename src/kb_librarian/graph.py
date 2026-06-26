@@ -12,6 +12,7 @@ dense O(n^2) hairball. Backlinks are the inverse of the directed edges above.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -128,6 +129,98 @@ def graph_to_dict(graph: Graph) -> dict[str, Any]:
         ],
         "backlinks": graph.backlinks(),
     }
+
+
+_CYTOSCAPE_CDN = "https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"
+
+_HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KB Librarian concept graph</title>
+<script src="__CDN__"></script>
+<style>
+  html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
+  #cy { position: absolute; inset: 0 320px 0 0; background: #fafafa; }
+  #panel { position: absolute; top: 0; right: 0; bottom: 0; width: 320px;
+            box-sizing: border-box; padding: 16px; overflow: auto;
+            border-left: 1px solid #ddd; background: #fff; }
+  #panel h1 { font-size: 15px; margin: 0 0 8px; }
+  #panel .meta { color: #666; font-size: 12px; margin-bottom: 12px; }
+  #detail { font-size: 13px; }
+  #detail .label { color: #888; }
+  .legend span { display: inline-block; margin-right: 12px; font-size: 12px; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+          margin-right: 4px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<div id="cy"></div>
+<div id="panel">
+  <h1>KB concept graph</h1>
+  <div class="meta">__SUMMARY__</div>
+  <div class="legend">
+    <span><span class="dot" style="background:#1f77b4"></span>link</span>
+    <span><span class="dot" style="background:#d62728"></span>disputes</span>
+  </div>
+  <hr>
+  <div id="detail">Click a node to see its details and backlinks.</div>
+</div>
+<script>
+const DATA = __DATA__;
+const backlinks = DATA.backlinks || {};
+const titles = {};
+DATA.nodes.forEach(n => titles[n.id] = n.title);
+const elements = [
+  ...DATA.nodes.map(n => ({ data: { id: n.id, label: n.title, topic: n.topic,
+      knowledge_type: n.knowledge_type, status: n.status } })),
+  ...DATA.edges.map((e, i) => ({ data: { id: 'e' + i, source: e.source,
+      target: e.target, type: e.type } })),
+];
+const cy = cytoscape({
+  container: document.getElementById('cy'),
+  elements,
+  style: [
+    { selector: 'node', style: { 'label': 'data(label)', 'font-size': 9,
+        'background-color': '#888', 'text-wrap': 'wrap', 'text-max-width': 90 } },
+    { selector: 'edge', style: { 'width': 1.5, 'line-color': '#1f77b4',
+        'target-arrow-color': '#1f77b4', 'target-arrow-shape': 'triangle',
+        'curve-style': 'bezier' } },
+    { selector: 'edge[type = "disputes"]', style: { 'line-color': '#d62728',
+        'target-arrow-color': '#d62728', 'line-style': 'dashed' } },
+  ],
+  layout: { name: 'cose', animate: false },
+});
+cy.on('tap', 'node', evt => {
+  const d = evt.target.data();
+  const incoming = (backlinks[d.id] || []);
+  const links = incoming.length
+    ? incoming.map(id => '<li>' + (titles[id] || id) + '</li>').join('')
+    : '<li><em>none</em></li>';
+  document.getElementById('detail').innerHTML =
+    '<h1>' + d.label + '</h1>' +
+    '<p><span class="label">id:</span> ' + d.id + '<br>' +
+    '<span class="label">topic:</span> ' + (d.topic || '—') + '<br>' +
+    '<span class="label">type:</span> ' + (d.knowledge_type || '—') + '<br>' +
+    '<span class="label">status:</span> ' + (d.status || '—') + '</p>' +
+    '<p class="label">referenced by:</p><ul>' + links + '</ul>';
+});
+</script>
+</body>
+</html>
+"""
+
+
+def render_html(graph: Graph) -> str:
+    """Render the graph as a single self-contained HTML page (Cytoscape via CDN)."""
+    payload = json.dumps(graph_to_dict(graph)).replace("</", "<\\/")
+    summary = f"{len(graph.nodes)} note(s), {len(graph.edges)} edge(s)"
+    return (
+        _HTML_TEMPLATE.replace("__CDN__", _CYTOSCAPE_CDN)
+        .replace("__SUMMARY__", summary)
+        .replace("__DATA__", payload)
+    )
 
 
 def render_graph_summary(graph: Graph) -> str:

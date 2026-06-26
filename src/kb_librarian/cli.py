@@ -26,7 +26,7 @@ from kb_librarian.errors import (
     NoteValidationError,
 )
 from kb_librarian.git_auto import AutoCommitResult, GitSnapshot, capture_git_snapshot, maybe_auto_commit
-from kb_librarian.graph import build_graph, graph_to_dict, render_graph_summary
+from kb_librarian.graph import build_graph, graph_to_dict, render_graph_summary, render_html
 from kb_librarian.hygiene import flag_suspect_note
 from kb_librarian.indexing import ReindexResult, group_records_for_indexing, reindex_data_dir
 from kb_librarian.init import initialize_data_dir, render_hooks_guidance, render_preamble_guidance
@@ -293,6 +293,7 @@ def _add_graph_parser(subcommands: argparse._SubParsersAction[argparse.ArgumentP
     )
     parser.add_argument("--data-dir", help="KB data directory. Overrides KB_DATA_DIR and configured defaults.")
     parser.add_argument("--json", action="store_true", help="Print the graph as machine-readable JSON.")
+    parser.add_argument("--html", metavar="PATH", help="Write an interactive HTML visualization to PATH.")
     parser.set_defaults(handler=_handle_graph)
 
 
@@ -968,6 +969,11 @@ def _handle_graph(args: argparse.Namespace) -> int:
     data_dir = resolve_data_dir(args.data_dir)
     initialize_data_dir(data_dir)
     graph = build_graph(data_dir)
+    if args.html:
+        out_path = Path(args.html)
+        out_path.write_text(render_html(graph), encoding="utf-8")
+        print(f"Wrote concept graph visualization to {out_path}")
+        return 0
     if args.json:
         print(json.dumps(graph_to_dict(graph), indent=2, sort_keys=True))
         return 0

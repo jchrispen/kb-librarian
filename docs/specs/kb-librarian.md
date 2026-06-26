@@ -16,7 +16,7 @@ A local-first knowledge base CLI for coding agents. Stores durable knowledge as 
 - `kb search` — lexical full-text search
 - `kb get` — fetch a note by ID
 - `kb topics` / `kb topic` — topic tree and per-topic note listing
-- `kb graph` — concept graph of note references (`disputes`, `[[id]]` wikilinks) and backlinks
+- `kb graph` — concept graph of note references (`disputes`, `[[id]]` wikilinks) and backlinks; optional interactive HTML visualization
 - `kb review` — manage the review queue (hygiene signals, compaction proposals)
 - `kb context` — high-precision task-shaped context retrieval
 - `kb explore` — broad-recall ideation retrieval

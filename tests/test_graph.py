@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from kb_librarian.graph import EDGE_DISPUTES, EDGE_LINK, build_graph, graph_to_dict
+import json
+
+from kb_librarian.graph import EDGE_DISPUTES, EDGE_LINK, build_graph, graph_to_dict, render_html
 from kb_librarian.notes import Note, write_note
 from kb_librarian.storage import canonical_note_path, ensure_topic_layout
 
@@ -60,3 +62,22 @@ def test_backlinks_are_inverse_of_edges(tmp_path):
 def test_empty_kb_yields_empty_graph(tmp_path):
     payload = graph_to_dict(build_graph(tmp_path))
     assert payload == {"nodes": [], "edges": [], "backlinks": {}}
+
+
+def test_render_html_is_self_contained_and_embeds_data(tmp_path):
+    _write(tmp_path, "note-a", "Topic", body="[[note-b]]")
+    _write(tmp_path, "note-b", "Topic")
+
+    html = render_html(build_graph(tmp_path))
+    assert html.startswith("<!DOCTYPE html>")
+    assert "cytoscape" in html
+    # Embedded payload is valid and present; no leftover format placeholders.
+    assert "note-a" in html and "note-b" in html
+    assert "__DATA__" not in html and "{{" not in html
+
+
+def test_render_html_escapes_closing_tags(tmp_path):
+    # A title containing </script> must not break out of the inline data block.
+    _write(tmp_path, "x", "Topic", title="evil </script> title")
+    html = render_html(build_graph(tmp_path))
+    assert "</script> title" not in html.split("</body>")[0].replace("<\\/script>", "")

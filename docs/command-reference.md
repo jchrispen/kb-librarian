@@ -92,12 +92,12 @@ Use `--tree` to render nested slash-delimited topics as a hierarchy. When `revie
 Build the concept graph of note-to-note references and their backlinks.
 
 ```bash
-kb graph [--json] [--data-dir <path>]
+kb graph [--json] [--html <path>] [--data-dir <path>]
 ```
 
 Edges are real references only: `disputes` frontmatter entries and `[[note-id]]` wikilinks in note bodies, each resolved against known note IDs (unresolved references are dropped). Tags and topics are carried on nodes for grouping, not turned into edges. Backlinks are the inverse of these directed edges.
 
-Without `--json`, prints a summary (note/edge counts, edge types, most-referenced notes). With `--json`, prints `{nodes, edges, backlinks}` for tooling or visualization.
+Without `--json`, prints a summary (note/edge counts, edge types, most-referenced notes). With `--json`, prints `{nodes, edges, backlinks}` for tooling or visualization. With `--html <path>`, writes an interactive force-directed graph (click a node for its details and backlinks); it loads Cytoscape.js from a CDN, so rendering needs network access.
 
 ## `kb ingest`
 
