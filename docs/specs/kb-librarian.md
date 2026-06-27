@@ -35,7 +35,7 @@ A local-first knowledge base CLI for coding agents. Stores durable knowledge as 
 
 Local-first Python CLI. No server, no daemon, no network calls in the critical path.
 
-**Storage:** Notes are markdown files with YAML frontmatter at `~/.kb/.library/notes/`. A SQLite FTS5 database at `~/.kb/.library/index.db` provides lexical search. All writes use atomic temp-file-then-rename via `atomic.py`.
+**Storage:** Notes are markdown files with YAML frontmatter under `~/.kb/.library/topics/` (slash-delimited topic hierarchy). A SQLite database at `~/.kb/.library/.kb/fts.sqlite` provides lexical search, using an FTS5 virtual table when available and falling back to a plain table scan with Python-side token scoring otherwise. All writes use atomic temp-file-then-rename via `atomic.py`.
 
 **Provider abstraction:** Providers are abstracted behind a credential-source/backend seam (`provider_seams.py`). The credential source (API key, vendor CLI delegation, env token) is decoupled from the transport (direct HTTP, Ollama, vLLM, LM Studio, Claude Code CLI, Codex CLI). Fallback chains are explicit and bounded.
 
@@ -47,7 +47,8 @@ Local-first Python CLI. No server, no daemon, no network calls in the critical p
 |---|---|
 | `cli.py` | CLI entry point and command routing |
 | `notes.py` | Note model (Note dataclass, YAML frontmatter, deterministic ID) |
-| `storage.py` | File I/O, KB publish/read, INDEX.md and PREAMBLE.md generation |
+| `storage.py` | File I/O, KB note publish/read, generated-file detection |
+| `indexing.py` | Generated index builders: INDEX.md topic pages, backlinks, manifest, stats; drives `reindex` and the lexical index build |
 | `paths.py` | KB path resolution (`KB_DIR`, per-command overrides) |
 | `atomic.py` | Atomic file write (write to temp, rename) |
 | `config.py` | Config model, per-operation overrides, default-provider policy |
@@ -71,7 +72,7 @@ Local-first Python CLI. No server, no daemon, no network calls in the critical p
 | `git_auto.py` | Optional auto-commit after mutations |
 | `doctor.py` | Health check subsystems (artifacts, index, locks, auth, backends) |
 | `errors.py` | Shared error types |
-| `init.py` | `kb init` command |
+| `init.py` | `kb init` command; PREAMBLE.md generation |
 
 ## Open questions
 
