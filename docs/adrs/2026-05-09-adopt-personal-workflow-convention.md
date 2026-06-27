@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded-by-2026-06-26-migrate-to-single-docs-tree
 date: 2026-05-09
 spec: ../specs/kb-librarian.md
 ---

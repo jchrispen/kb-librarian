@@ -200,31 +200,25 @@ For offline development or tests, the codebase also supports a deterministic `mo
 
 ## Documentation
 
-- [User Guide](docs/user-guide.md)
-- [Codex KB Demo Guide](docs/codex-kb-demo.md)
+The repo follows the personal-workflow docs convention. Durable artifacts live under `docs/`; transient plans live in `docs/plans/`.
+
+User-facing:
+
+- [User Guide](docs/userguide.md)
 - [Configuration Reference](docs/configuration.md)
 - [Command Reference](docs/command-reference.md)
-- [Release Guide](docs/releasing.md)
 - [Troubleshooting](docs/troubleshooting.md)
-- [Canonical Design Spec](docs/superpowers/specs/kb-librarian-agent-first-design.md)
 
-## Development Notes
+Developer-facing (`docs/dev/`):
 
-The root README is the end-user entry point. The files under `docs/superpowers/` are design and planning artifacts for implementation work.
+- [Testing](docs/dev/testing.md) — install, run tests, coverage
+- [Release Guide](docs/dev/releasing.md)
+- [Codex KB Demo Guide](docs/dev/codex-kb-demo.md)
 
-For local test runs, install the test extras first:
+Design & decisions:
 
-```bash
-python3 -m pip install -e ".[test]"
-```
-
-Run deterministic corpus regression checks:
-
-```bash
-pytest -q tests/test_golden_corpus.py
-```
-
-Standard `pytest` runs now include a terminal code-coverage summary for `kb_librarian`.
+- [Canonical Design Spec](docs/specs/kb-librarian.md)
+- [Architecture Decisions](docs/adrs/_index.md) · [Notes](docs/notes/_index.md)
 
 Optional live-provider smoke run (explicit opt-in):
 
