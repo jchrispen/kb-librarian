@@ -32,11 +32,13 @@ addopts = [
 ]
 pythonpath = ["src"]
 testpaths = ["tests"]
+cache_dir = "build/pytest_cache"
 
 [tool.coverage.run]
 branch = true
 patch = ["subprocess"]
 source = ["kb_librarian"]
+data_file = "build/coverage/.coverage"
 
 [tool.coverage.report]
 skip_covered = true

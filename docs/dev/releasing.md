@@ -17,10 +17,10 @@ python3 -m pip install build
 Build a source distribution and wheel:
 
 ```bash
-python3 -m build
+python3 -m build      # or: make build (runs make clean first)
 ```
 
-This writes release artifacts to `dist/`.
+This writes release artifacts to `dist/`. Transient build/test products go under `build/` instead; `make clean` removes both.
 
 ## Test A Built Wheel
 
