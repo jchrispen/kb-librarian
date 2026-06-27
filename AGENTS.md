@@ -49,10 +49,3 @@ Each milestone must be:
 - Explicit about public interfaces, data/state changes, tests, acceptance criteria, and out-of-scope items.
 
 Avoid large omnibus task lists. Split work by runnable increments, not by abstract subsystem. Do not create implementation code unless explicitly requested.
-
-## Shared Agent Skills
-
-For shared agent skills, see [`.agents/agent-skills/AGENTS.md`](.agents/agent-skills/AGENTS.md).
-
-- For OpenCode, Codex CLI, and other `AGENTS.md`-aware agents, treat `.agents/agent-skills/AGENTS.md` as an active skill index, not a passive reference.
-- Before planning or editing, if the task plausibly matches one of those shared skill descriptions, read the matching `.agents/agent-skills/skills/<name>/SKILL.md` first and follow any referenced files it points to.
