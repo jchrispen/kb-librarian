@@ -3277,6 +3277,10 @@ def test_codex_http_error_unreadable_body():
     class _UnreadableBody:
         def read(self):
             raise OSError("cannot read")
+
+        def close(self):
+            pass
+
     exc = urllib.error.HTTPError("https://api.openai.com/v1/responses", 500, "Error", {}, _UnreadableBody())
     err = _codex_http_error(exc)
     assert "500" in str(err)  # no body but still has code info
@@ -3411,6 +3415,10 @@ def test_local_openai_compatible_http_error_unreadable_body(monkeypatch):
     class _UnreadableBody:
         def read(self):
             raise OSError("cannot read")
+
+        def close(self):
+            pass
+
     exc = urllib.error.HTTPError("http://localhost:8000/v1/responses", 500, "Error", {}, _UnreadableBody())
     def fake_urlopen(request, timeout):
         raise exc
@@ -3802,6 +3810,10 @@ def test_anthropic_provider_http_error_unreadable_body(monkeypatch):
     class _UnreadableBody:
         def read(self):
             raise OSError("cannot read body")
+
+        def close(self):
+            pass
+
     exc = urllib.error.HTTPError(
         "https://api.anthropic.com/v1/messages", 503, "Service Unavailable", {},
         _UnreadableBody()
