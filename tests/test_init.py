@@ -155,3 +155,32 @@ def test_initialize_data_dir_hooks_templates_are_idempotent(tmp_path):
 
     assert created == []
     assert before == after
+
+
+def test_initialize_data_dir_hooks_updates_stale_hook_template(tmp_path):
+    initialize_data_dir(tmp_path, hooks=True)
+    hook_path = tmp_path / ".kb" / "hooks" / "session-start.sh"
+    hook_path.write_text("# outdated content\n", encoding="utf-8")
+
+    created = initialize_data_dir(tmp_path, hooks=True)
+
+    assert hook_path in created
+    assert "outdated content" not in hook_path.read_text(encoding="utf-8")
+
+
+def test_managed_preamble_detected_by_prefix_and_tail(tmp_path):
+    # A preamble from a different data_dir path has the same managed prefix/tail
+    # and should be recognised as managed and updated.
+    path_a = tmp_path / "a"
+    path_b = tmp_path / "b"
+    initialize_data_dir(path_a)
+
+    preamble_from_a = (path_a / "PREAMBLE.md").read_text(encoding="utf-8")
+    path_b.mkdir(parents=True)
+    (path_b / "PREAMBLE.md").write_text(preamble_from_a, encoding="utf-8")
+
+    created = initialize_data_dir(path_b, hooks=True)
+
+    preamble_b = path_b / "PREAMBLE.md"
+    assert preamble_b in created
+    assert str(path_b) in preamble_b.read_text(encoding="utf-8")

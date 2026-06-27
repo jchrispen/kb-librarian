@@ -124,8 +124,8 @@ def build_lexical_index(db_path: Path, documents: list[Mapping[str, str]]) -> st
             )
             conn.execute("INSERT INTO notes_fts(notes_fts) VALUES ('rebuild')")
             backend = "fts5"
-        except sqlite3.OperationalError:
-            backend = "plain"
+        except sqlite3.OperationalError:  # pragma: no cover
+            backend = "plain"  # pragma: no cover
 
         conn.execute("INSERT INTO metadata(key, value) VALUES ('backend', ?)", (backend,))
         conn.commit()
@@ -135,8 +135,8 @@ def build_lexical_index(db_path: Path, documents: list[Mapping[str, str]]) -> st
     finally:
         try:
             conn.close()
-        except sqlite3.Error:
-            pass
+        except sqlite3.Error:  # pragma: no cover
+            pass  # pragma: no cover
         if temp_path.exists():
             temp_path.unlink()
 

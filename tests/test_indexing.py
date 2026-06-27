@@ -1,13 +1,29 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+
+import pytest
 
 from kb_librarian.config import default_config
+from kb_librarian.errors import KBLibrarianError, SearchIndexError
 from kb_librarian.indexing import index_document, reindex_data_dir
 from kb_librarian.init import initialize_data_dir
 from kb_librarian.notes import Note, write_note
-from kb_librarian.retrieval import CandidateQuery, candidate_source_from_config, ranker_from_config
-from kb_librarian.search_index import score_document, tokenize_query
+from kb_librarian.retrieval import (
+    CandidateQuery,
+    LexicalRanker,
+    candidate_source_from_config,
+    embedding_seam_status,
+    ranker_from_config,
+)
+from kb_librarian.search_index import (
+    build_lexical_index,
+    load_backend,
+    query_candidates,
+    score_document,
+    tokenize_query,
+)
 from kb_librarian.storage import canonical_note_path
 
 
@@ -330,3 +346,186 @@ def test_retrieval_seam_uses_lexical_source_and_ranker_by_default(tmp_path):
 
     assert source.name == "lexical"
     assert [item["id"] for item in ranked] == [target_id]
+
+
+# --- retrieval.py gap coverage ---
+
+def test_lexical_ranker_filters_zero_score_candidates():
+    ranker = LexicalRanker(weights={"title_weight": 5})
+    # Candidates with no matching tokens score 0 and must be dropped.
+    candidates = [
+        {
+            "id": "2026-01-01-a",
+            "title": "no match here",
+            "summary": "",
+            "tags": "",
+            "retrieval_phrases": "",
+            "body": "",
+            "updated": "2026-01-01",
+        }
+    ]
+    result = ranker.rank(candidates, query="zzzunlikelytokenzzzz")
+    assert result == []
+
+
+def test_candidate_source_from_config_raises_without_retrieval_mapping():
+    with pytest.raises(KBLibrarianError, match="retrieval must be a mapping"):
+        candidate_source_from_config(None, {})
+
+
+def test_candidate_source_from_config_raises_when_lexical_index_disabled():
+    config = {"retrieval": {"lexical_index": False}}
+    with pytest.raises(KBLibrarianError, match="No supported retrieval source"):
+        candidate_source_from_config(None, config)
+
+
+def test_ranker_from_config_raises_without_retrieval_mapping():
+    with pytest.raises(KBLibrarianError, match="retrieval must be a mapping"):
+        ranker_from_config({})
+
+
+def test_embedding_seam_status_returns_false_without_retrieval_mapping():
+    status = embedding_seam_status({})
+    assert status == {"configured": False, "enabled": False, "supported": False}
+
+
+def test_embedding_seam_status_with_retrieval_mapping():
+    config = {"retrieval": {"lexical_index": True, "embedding_provider": "openai"}}
+    status = embedding_seam_status(config)
+    assert status["configured"] is True
+    assert status["supported"] is False
+
+
+# --- search_index.py gap coverage ---
+
+def _make_plain_db(db_path):
+    """Create a minimal SQLite search DB without FTS5 (plain backend)."""
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE notes (
+            id TEXT PRIMARY KEY, path TEXT NOT NULL, title TEXT NOT NULL,
+            summary TEXT NOT NULL, topic TEXT NOT NULL, knowledge_type TEXT NOT NULL,
+            tags TEXT NOT NULL, retrieval_phrases TEXT NOT NULL, agent_use TEXT NOT NULL,
+            applies_when TEXT NOT NULL, does_not_apply_when TEXT NOT NULL,
+            body TEXT NOT NULL, status TEXT NOT NULL, confidence TEXT NOT NULL,
+            updated TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    conn.execute("INSERT INTO metadata VALUES ('backend', 'plain')")
+    conn.commit()
+    conn.close()
+
+
+def test_load_backend_raises_when_db_missing(tmp_path):
+    with pytest.raises(SearchIndexError, match="not found"):
+        load_backend(tmp_path / "nonexistent.sqlite")
+
+
+def test_load_backend_returns_plain_when_no_metadata_row(tmp_path):
+    db_path = tmp_path / "fts.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    conn.commit()
+    conn.close()
+    assert load_backend(db_path) == "plain"
+
+
+def test_query_candidates_empty_query_returns_nothing(tmp_path):
+    db_path = tmp_path / "fts.sqlite"
+    _make_plain_db(db_path)
+    result = query_candidates(db_path, query="")
+    assert result == []
+
+
+def test_query_candidates_with_plain_backend(tmp_path):
+    db_path = tmp_path / "fts.sqlite"
+    _make_plain_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT INTO notes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "2026-01-01-note", "/path/to/note.md", "Plain note",
+            "summary", "topic", "technique", "tag", "phrase",
+            "", "", "", "body text", "active", "high", "2026-01-01",
+        ),
+    )
+    conn.commit()
+    conn.close()
+    result = query_candidates(db_path, query="plain note")
+    ids = [r["id"] for r in result]
+    assert "2026-01-01-note" in ids
+
+
+def test_tokenize_query_deduplicates_repeated_tokens():
+    tokens = tokenize_query("cli cli contract cli")
+    assert tokens == ["cli", "contract"]
+
+
+def test_load_backend_raises_on_corrupted_db(tmp_path):
+    db_path = tmp_path / "bad.sqlite"
+    db_path.write_bytes(b"not a sqlite database")
+    with pytest.raises(SearchIndexError, match="Invalid search index"):
+        load_backend(db_path)
+
+
+def test_render_page_navigation_single_page_no_nav_links():
+    from kb_librarian.indexing import _render_page_navigation
+    # With only 1 page, navigation should have no Previous/Next links.
+    lines = _render_page_navigation(1, 1)
+    assert "Navigation:" not in "\n".join(lines)
+    assert "Pages:" in "\n".join(lines)
+
+
+def test_reindex_raises_when_scan_clusters_called_without_config(tmp_path):
+    initialize_data_dir(tmp_path)
+    with pytest.raises(ValueError, match="config is required"):
+        from kb_librarian.indexing import reindex_data_dir as _reindex
+        _reindex(tmp_path, scan_clusters=True, config=None)
+
+
+def test_group_records_returns_empty_when_topics_dir_absent(tmp_path):
+    from kb_librarian.indexing import group_records_for_indexing
+    # data_dir without a topics/ dir → grouped should just be {} for no records
+    result = group_records_for_indexing(tmp_path, [])
+    assert result == {}
+
+
+def test_topic_scope_summary_returns_default_when_all_lines_blank(tmp_path):
+    from kb_librarian.indexing import _topic_scope_summary
+    topic_dir = tmp_path / "topics" / "test"
+    topic_dir.mkdir(parents=True)
+    (topic_dir / "scope.txt").write_text("\n\n   \n", encoding="utf-8")
+    assert _topic_scope_summary(topic_dir) == "topic notes"
+
+
+def test_configured_page_size_returns_default_for_missing_indexes(tmp_path):
+    from kb_librarian.indexing import _configured_page_size
+    assert _configured_page_size({"no_indexes": True}, key="topic_page_size", default=25) == 25
+    assert _configured_page_size({"indexes": {"topic_page_size": True}}, key="topic_page_size", default=25) == 25
+    assert _configured_page_size({"indexes": {"topic_page_size": 0}}, key="topic_page_size", default=25) == 25
+
+
+def test_stale_index_pages_skips_topics_root_when_absent(tmp_path):
+    from kb_librarian.indexing import _stale_generated_index_pages
+    # If topics/ doesn't exist, should not fail and return candidates from data_dir only.
+    result = _stale_generated_index_pages(tmp_path, expected_paths=set())
+    assert result == []
+
+
+def test_score_document_exact_id_match_boosts_score():
+    note_id = "2026-01-01-exact"
+    doc = {
+        "id": note_id,
+        "title": "Some title",
+        "summary": "summary",
+        "tags": "",
+        "retrieval_phrases": "",
+        "body": "",
+    }
+    tokens = tokenize_query(note_id)
+    score = score_document(doc, query=note_id, tokens=tokens, weights={})
+    # Exact id match adds 10_000 to score
+    assert score >= 10_000.0

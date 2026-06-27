@@ -55,6 +55,25 @@ def test_ensure_topic_layout_creates_nested_parent_and_child_scope_files(tmp_pat
     assert created
 
 
+def test_normalize_topic_path_skips_empty_segments():
+    # A segment consisting only of dashes normalizes to "" after strip("-") and should be dropped.
+    result = normalize_topic_for_path("agent-systems/--/design")
+    assert result == "agent-systems/design"
+
+
+def test_load_note_records_raises_on_invalid_note_file(tmp_path):
+    from kb_librarian.errors import NoteParseError
+    from kb_librarian.storage import load_note_records
+
+    topic_dir = tmp_path / "topics" / "test-topic"
+    topic_dir.mkdir(parents=True)
+    bad_note = topic_dir / "2026-01-01-bad.md"
+    bad_note.write_text("not valid frontmatter at all", encoding="utf-8")
+
+    with pytest.raises(NoteParseError, match="file:"):
+        load_note_records(tmp_path)
+
+
 def test_duplicate_note_id_detection():
     record_one = NoteRecord(
         path=canonical_note_path(

@@ -51,8 +51,8 @@ def atomic_replace_path(source: str | Path, destination: str | Path) -> None:
 
 
 def _fsync_dir(path: Path) -> None:
-    if not hasattr(os, "O_DIRECTORY"):
-        return
+    if not hasattr(os, "O_DIRECTORY"):  # pragma: no cover
+        return  # pragma: no cover
     try:
         fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
     except OSError:

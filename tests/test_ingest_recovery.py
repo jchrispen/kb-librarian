@@ -212,6 +212,37 @@ def test_atomic_write_text_preserves_existing_when_replace_fails(tmp_path, monke
     assert not list(tmp_path.glob(".artifact.txt.*.tmp"))
 
 
+def test_atomic_write_bytes_handles_unlink_failure_during_cleanup(tmp_path, monkeypatch):
+    # When os.replace raises AND the temp cleanup also raises FileNotFoundError,
+    # the exception must not propagate (the original error is re-raised instead).
+    path = tmp_path / "target.txt"
+    original_unlink = Path.unlink
+
+    def fail_replace(src, dst):
+        raise OSError("replace failed")
+
+    def fail_unlink(self, missing_ok=False):
+        raise FileNotFoundError("already gone")
+
+    monkeypatch.setattr(atomic.os, "replace", fail_replace)
+    monkeypatch.setattr(Path, "unlink", fail_unlink)
+
+    with pytest.raises(OSError, match="replace failed"):
+        atomic.atomic_write_bytes(path, b"data")
+
+
+def test_fsync_dir_handles_os_open_failure(tmp_path, monkeypatch):
+    import os as _os
+    from kb_librarian.atomic import _fsync_dir
+
+    def fail_open(path, flags):
+        raise OSError("cannot open dir")
+
+    monkeypatch.setattr(_os, "open", fail_open)
+    # Should return silently without raising.
+    _fsync_dir(tmp_path)
+
+
 def test_failed_lexical_index_rebuild_preserves_existing_index(tmp_path):
     index_path = tmp_path / "fts.sqlite"
     build_lexical_index(

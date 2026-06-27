@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import json
 
-from kb_librarian.graph import EDGE_DISPUTES, EDGE_LINK, build_graph, graph_to_dict, render_html
+from kb_librarian.graph import (
+    EDGE_DISPUTES,
+    EDGE_LINK,
+    build_graph,
+    graph_to_dict,
+    render_graph_summary,
+    render_html,
+)
 from kb_librarian.notes import Note, write_note
 from kb_librarian.storage import canonical_note_path, ensure_topic_layout
 
@@ -81,3 +88,49 @@ def test_render_html_escapes_closing_tags(tmp_path):
     _write(tmp_path, "x", "Topic", title="evil </script> title")
     html = render_html(build_graph(tmp_path))
     assert "</script> title" not in html.split("</body>")[0].replace("<\\/script>", "")
+
+
+def test_build_graph_disputes_as_string(tmp_path):
+    # disputes as a bare string (not a list) should still resolve an edge.
+    _write(tmp_path, "note-a", "Topic", disputes="note-b")
+    _write(tmp_path, "note-b", "Topic")
+
+    graph = build_graph(tmp_path)
+    edges = {(e.source, e.target, e.type) for e in graph.edges}
+    assert ("note-a", "note-b", EDGE_DISPUTES) in edges
+
+
+def test_build_graph_deduplicates_wikilink_edges(tmp_path):
+    # Same [[id]] wikilink appearing twice in body must produce only one edge.
+    _write(tmp_path, "note-a", "Topic", body="[[note-b]] and also [[note-b]] again.")
+    _write(tmp_path, "note-b", "Topic")
+
+    graph = build_graph(tmp_path)
+    link_edges = [e for e in graph.edges if e.type == EDGE_LINK]
+    assert len(link_edges) == 1
+
+
+def test_render_graph_summary_empty_graph(tmp_path):
+    summary = render_graph_summary(build_graph(tmp_path))
+    assert "No notes found" in summary
+
+
+def test_render_graph_summary_with_nodes_no_edges(tmp_path):
+    _write(tmp_path, "note-a", "Topic")
+    _write(tmp_path, "note-b", "Topic")
+
+    summary = render_graph_summary(build_graph(tmp_path))
+    assert "2 note(s)" in summary
+    assert "No reference edges" in summary
+
+
+def test_render_graph_summary_with_edges_and_backlinks(tmp_path):
+    _write(tmp_path, "note-a", "Topic", body="[[note-c]]")
+    _write(tmp_path, "note-b", "Topic", body="[[note-c]]")
+    _write(tmp_path, "note-c", "Topic")
+
+    summary = render_graph_summary(build_graph(tmp_path))
+    assert "3 note(s)" in summary
+    assert "Edges by type" in summary
+    assert "Most referenced" in summary
+    assert "note-c" in summary

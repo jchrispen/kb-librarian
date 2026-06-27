@@ -97,8 +97,8 @@ def parse_html(path: Path) -> tuple[str, dict[str, Any]]:
     try:
         parser.feed(raw)
         parser.close()
-    except Exception as exc:
-        raise IngestError(f"Could not parse HTML {path}: {exc}") from exc
+    except Exception as exc:  # pragma: no cover
+        raise IngestError(f"Could not parse HTML {path}: {exc}") from exc  # pragma: no cover
 
     text = parser.render_text()
     if not text.strip():

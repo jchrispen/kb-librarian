@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import socket
 import urllib.error
 
 import pytest
@@ -10,6 +11,8 @@ from kb_librarian.provider_retry import (
     FailureClassification,
     RetryEvent,
     RetryPolicy,
+    _coerce_float,
+    _coerce_int,
     call_with_retry,
     classify_provider_failure,
     retry_policy_from_config,
@@ -138,3 +141,74 @@ def test_call_with_retry_raises_after_max_attempts_for_transient_failure():
     assert len(retries) == 2
     assert len(finals) == 1
     assert finals[0].attempt == 3
+
+
+def test_classify_provider_failure_detects_timeout():
+    error = ProviderError("timed out")
+    error.__cause__ = TimeoutError("connection timed out")
+
+    classification = classify_provider_failure(error)
+
+    assert classification.transient is True
+    assert classification.kind == "timeout"
+
+
+def test_classify_provider_failure_detects_url_error():
+    error = ProviderError("transport failed")
+    error.__cause__ = urllib.error.URLError("network unreachable")
+
+    classification = classify_provider_failure(error)
+
+    assert classification.transient is True
+    assert classification.kind == "transport_error"
+
+
+def test_retry_policy_from_config_with_non_mapping_providers():
+    # providers key is absent — should use all defaults without error.
+    policy = retry_policy_from_config({})
+    assert policy.max_attempts == 3
+    assert policy.base_delay_seconds == 0.25
+
+
+def test_call_with_retry_without_on_retry_callback():
+    # Verify retrying works when on_retry is not supplied (None path).
+    attempts = {"count": 0}
+
+    def call() -> str:
+        attempts["count"] += 1
+        if attempts["count"] < 2:
+            raise ProviderError("service unavailable")
+        return "done"
+
+    result = call_with_retry(
+        "test:op",
+        call,
+        policy=RetryPolicy(max_attempts=3, base_delay_seconds=0.0, max_delay_seconds=0.0, jitter_seconds=0.0),
+        sleep=lambda _: None,
+    )
+    assert result == "done"
+    assert attempts["count"] == 2
+
+
+def test_coerce_int_returns_default_for_bool_and_non_int():
+    assert _coerce_int(True, default=5, minimum=1) == 5
+    assert _coerce_int("3", default=5, minimum=1) == 5
+
+
+def test_coerce_float_returns_default_for_bool_and_non_numeric():
+    assert _coerce_float(True, default=1.0, minimum=0.0) == 1.0
+    assert _coerce_float("fast", default=1.0, minimum=0.0) == 1.0
+
+
+def test_call_with_retry_without_on_final_failure_callback():
+    # Permanent failure with on_final_failure=None should still raise.
+    def call() -> str:
+        raise ProviderError("Provider response was not valid JSON")
+
+    with pytest.raises(ProviderError, match="stopped without retry"):
+        call_with_retry(
+            "test:op",
+            call,
+            policy=RetryPolicy(max_attempts=3, base_delay_seconds=0.0, max_delay_seconds=0.0, jitter_seconds=0.0),
+            sleep=lambda _: None,
+        )

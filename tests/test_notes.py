@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from datetime import date, datetime
+
 import pytest
 
-from kb_librarian.errors import NoteValidationError
+from kb_librarian.errors import NoteParseError, NoteValidationError
 from kb_librarian.notes import (
     BODY_TEMPLATES,
     Note,
+    _date_to_iso,
+    _normalize_yaml_value,
+    _require_non_empty_string,
+    _validate_string_list,
     body_template,
     generate_note_id,
     parse_note_text,
@@ -116,3 +122,56 @@ def test_body_templates_cover_all_note_types():
 
     with pytest.raises(NoteValidationError):
         body_template("memo")
+
+
+def test_parse_note_text_raises_on_missing_closing_delimiter():
+    text = "---\nid: test\n"
+    with pytest.raises(NoteParseError, match="missing closing"):
+        parse_note_text(text, validate=False)
+
+
+def test_parse_note_text_raises_on_invalid_yaml():
+    text = "---\nkey: !!python/object:os.system [id]\n---\nbody\n"
+    with pytest.raises(NoteParseError, match="Malformed YAML"):
+        parse_note_text(text, validate=False)
+
+
+def test_parse_note_text_raises_on_non_mapping_yaml():
+    text = "---\njust a scalar value\n---\nbody\n"
+    with pytest.raises(NoteParseError, match="must be a mapping"):
+        parse_note_text(text, validate=False)
+
+
+def test_validate_frontmatter_raises_on_non_mapping():
+    with pytest.raises(NoteValidationError, match="must be a mapping"):
+        validate_frontmatter(42)
+
+
+def test_require_non_empty_string_raises_on_empty():
+    with pytest.raises(NoteValidationError, match="must be a non-empty string"):
+        _require_non_empty_string("", "title")
+
+
+def test_validate_string_list_raises_on_non_list():
+    with pytest.raises(NoteValidationError, match="must be a list"):
+        _validate_string_list(42, "tags")
+
+
+def test_date_to_iso_handles_datetime_object():
+    result = _date_to_iso(datetime(2026, 1, 15, 12, 0), "created")
+    assert result == "2026-01-15"
+
+
+def test_date_to_iso_raises_on_invalid_date_string():
+    with pytest.raises(NoteValidationError, match="must be an ISO date"):
+        _date_to_iso("not-a-date", "created")
+
+
+def test_date_to_iso_raises_on_non_string_non_date():
+    with pytest.raises(NoteValidationError, match="must be an ISO date string"):
+        _date_to_iso(20260115, "created")
+
+
+def test_normalize_yaml_value_converts_datetime_to_date():
+    dt = datetime(2026, 3, 1, 10, 30)
+    assert _normalize_yaml_value(dt) == date(2026, 3, 1)

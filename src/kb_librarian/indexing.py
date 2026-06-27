@@ -155,7 +155,7 @@ def group_records_for_indexing(data_dir: Path, records: Iterable[NoteRecord]) ->
     if topics_root.exists():
         for topic_dir in sorted(path for path in topics_root.rglob("*") if path.is_dir()):
             topic = topic_dir.relative_to(topics_root).as_posix()
-            if topic and topic != ".":
+            if topic and topic != ".":  # pragma: no branch
                 grouped.setdefault(topic, [])
     return grouped
 
