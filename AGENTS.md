@@ -8,4 +8,4 @@ KB Librarian is an agent-first local knowledge base CLI (entry point: `kb`).
 - Transient plans/research: `docs/plans/`.
 - Build & test: `docs/dev/testing.md`.
 
-Phases 1–6 are shipped. The spec's "Deferred backlog" (embedding-based retrieval, MCP wrapper, TUI/web review, multi-machine helpers, interactive cloud-call confirmation) is out of scope unless explicitly requested.
+The core agent workflow is shipped (see README "Core Commands"). Deferred work lives in the spec's **Out of scope** and **Open questions** sections (embedding/semantic retrieval, MCP wrapper, remaining provider backends) — out of scope unless explicitly requested. Active transient work is tracked in `docs/plans/`.
