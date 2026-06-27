@@ -40,4 +40,4 @@ build: clean venv ## Build wheel + sdist into dist/
 	$(PY) -m build
 
 test: venv ## Run the test suite
-	$(PY) -m pytest
+	$(PY) -m pytest --color=yes

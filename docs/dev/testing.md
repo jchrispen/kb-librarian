@@ -30,7 +30,7 @@ Run `make` (or `make help`) to list targets; `help` is the default goal, so a ba
 pytest          # or: make test
 ```
 
-`pytest` is configured in `pyproject.toml` with `pythonpath=["src"]` and `testpaths=["tests"]`, and every run includes a terminal code-coverage summary for `kb_librarian` (`--cov`, branch coverage on). Transient products (pytest cache, coverage data) are written under `build/`, and bytecode writes are disabled to keep the source tree clean; `make clean` removes `build/`, `dist/`, `*.egg-info`, and any stray `__pycache__`.
+`pytest` is configured in `pyproject.toml` with `pythonpath=["src"]` and `testpaths=["tests"]`, and every run includes a terminal code-coverage summary for `kb_librarian` (`--cov`, branch coverage on). `make test` keeps pytest color enabled for green pass markers and red failures; the test harness writes progress percentages in plain text so later passing files do not look red after the first failure. Transient products (pytest cache, coverage data) are written under `build/`, and bytecode writes are disabled to keep the source tree clean; `make clean` removes `build/`, `dist/`, `*.egg-info`, and any stray `__pycache__`.
 
 Run the deterministic corpus regression checks alone:
 

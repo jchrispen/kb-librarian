@@ -1841,11 +1841,10 @@ def _acknowledge_dispute_on_note(path: Path, *, item_id: str) -> bool:
         if not isinstance(entry, dict):
             continue
         if entry.get("review_item_id") == item_id:
-            if "acknowledged_at" not in entry:
-                entry["acknowledged_at"] = datetime.now().isoformat(timespec="seconds")
-                changed = True
             if not entry.get("acknowledged"):
                 entry["acknowledged"] = True
+                if "acknowledged_at" not in entry:
+                    entry["acknowledged_at"] = datetime.now().isoformat(timespec="seconds")
                 changed = True
             break
     else:
