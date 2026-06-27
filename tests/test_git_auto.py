@@ -95,7 +95,7 @@ import subprocess
 from kb_librarian.git_auto import (
     AutoCommitResult, GitSnapshot, _log_auto_commit_event,
     _operation_paths, _parse_porcelain_status, _preexisting_unrelated_paths,
-    _relative_prefix, _relative_to_root, _run_git, build_commit_message,
+    _relative_prefix, _relative_to_root, _run_git as _kb_run_git, build_commit_message,
     capture_git_snapshot, git_worktree_root,
 )
 
@@ -165,9 +165,9 @@ def test_maybe_auto_commit_before_snapshot_error(tmp_path):
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is not available")
 def test_maybe_auto_commit_after_snapshot_root_becomes_none(tmp_path):
-    _run_git_direct(tmp_path, "init")
-    _run_git_direct(tmp_path, "config", "user.email", "t@t.com")
-    _run_git_direct(tmp_path, "config", "user.name", "Test")
+    _run_git(tmp_path, "init")
+    _run_git(tmp_path, "config", "user.email", "t@t.com")
+    _run_git(tmp_path, "config", "user.name", "Test")
     config = default_config(tmp_path)
     config["git"]["auto_commit"] = True
     before = capture_git_snapshot(tmp_path)
@@ -182,9 +182,9 @@ def test_maybe_auto_commit_after_snapshot_root_becomes_none(tmp_path):
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is not available")
 def test_maybe_auto_commit_after_snapshot_error(tmp_path):
-    _run_git_direct(tmp_path, "init")
-    _run_git_direct(tmp_path, "config", "user.email", "t@t.com")
-    _run_git_direct(tmp_path, "config", "user.name", "Test")
+    _run_git(tmp_path, "init")
+    _run_git(tmp_path, "config", "user.email", "t@t.com")
+    _run_git(tmp_path, "config", "user.name", "Test")
     config = default_config(tmp_path)
     config["git"]["auto_commit"] = True
     before = capture_git_snapshot(tmp_path)
@@ -198,9 +198,9 @@ def test_maybe_auto_commit_after_snapshot_error(tmp_path):
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is not available")
 def test_maybe_auto_commit_no_new_changes(tmp_path):
-    _run_git_direct(tmp_path, "init")
-    _run_git_direct(tmp_path, "config", "user.email", "t@t.com")
-    _run_git_direct(tmp_path, "config", "user.name", "Test")
+    _run_git(tmp_path, "init")
+    _run_git(tmp_path, "config", "user.email", "t@t.com")
+    _run_git(tmp_path, "config", "user.name", "Test")
     config = default_config(tmp_path)
     config["git"]["auto_commit"] = True
     before = capture_git_snapshot(tmp_path)
@@ -214,9 +214,9 @@ def test_maybe_auto_commit_no_new_changes(tmp_path):
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is not available")
 def test_maybe_auto_commit_add_fails(tmp_path):
-    _run_git_direct(tmp_path, "init")
-    _run_git_direct(tmp_path, "config", "user.email", "t@t.com")
-    _run_git_direct(tmp_path, "config", "user.name", "Test")
+    _run_git(tmp_path, "init")
+    _run_git(tmp_path, "config", "user.email", "t@t.com")
+    _run_git(tmp_path, "config", "user.name", "Test")
     config = default_config(tmp_path)
     config["git"]["auto_commit"] = True
     before = capture_git_snapshot(tmp_path)
@@ -232,7 +232,7 @@ def test_maybe_auto_commit_add_fails(tmp_path):
 
     def _fake_run(root, *args):
         if args[0] == "status":
-            return _run_git(root, *args)
+            return _kb_run_git(root, *args)
         elif args[0] == "add":
             return fail_result
         return success
@@ -247,9 +247,9 @@ def test_maybe_auto_commit_add_fails(tmp_path):
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is not available")
 def test_maybe_auto_commit_commit_fails(tmp_path):
-    _run_git_direct(tmp_path, "init")
-    _run_git_direct(tmp_path, "config", "user.email", "t@t.com")
-    _run_git_direct(tmp_path, "config", "user.name", "Test")
+    _run_git(tmp_path, "init")
+    _run_git(tmp_path, "config", "user.email", "t@t.com")
+    _run_git(tmp_path, "config", "user.name", "Test")
     config = default_config(tmp_path)
     config["git"]["auto_commit"] = True
     before = capture_git_snapshot(tmp_path)
@@ -265,7 +265,7 @@ def test_maybe_auto_commit_commit_fails(tmp_path):
 
     def _fake_run(root, *args):
         if args[0] == "status":
-            return _run_git(root, *args)
+            return _kb_run_git(root, *args)
         elif args[0] == "add":
             return success
         elif args[0] == "commit":
@@ -383,10 +383,5 @@ def test_parse_porcelain_status_empty_path_text():
 
 def test_run_git_git_not_found(tmp_path):
     with patch("kb_librarian.git_auto.subprocess.run", side_effect=FileNotFoundError("no git")):
-        result = _run_git(tmp_path, "status")
+        result = _kb_run_git(tmp_path, "status")
     assert result.returncode == 127
-
-
-def _run_git_direct(cwd: Path, *args: str) -> str:
-    result = subprocess.run(["git", *args], cwd=cwd, text=True, capture_output=True, check=True)
-    return result.stdout.strip()
