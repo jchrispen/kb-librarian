@@ -73,6 +73,28 @@ def test_auto_commit_commits_operation_paths(tmp_path):
     assert _run_git(tmp_path, "status", "--porcelain") == ""
 
 
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not available")
+def test_auto_commit_log_path_already_in_operation_paths(tmp_path):
+    # When .kb/errors.log is already tracked as an operation path, don't add it twice (line 162->165)
+    _run_git(tmp_path, "init")
+    _run_git(tmp_path, "config", "user.email", "test@example.com")
+    _run_git(tmp_path, "config", "user.name", "Test User")
+
+    data_dir = tmp_path
+    config = default_config(data_dir)
+    config["git"]["auto_commit"] = True
+    before = capture_git_snapshot(data_dir)
+    # Write both the operation file and the errors.log file so log_path IS in operation_paths
+    (data_dir / "operation.md").write_text("op\n", encoding="utf-8")
+    log_dir = data_dir / ".kb"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    (log_dir / "errors.log").write_text("log entry\n", encoding="utf-8")
+
+    result = maybe_auto_commit(data_dir, config, operation="ingest", identifiers=["x"], before=before)
+
+    assert result.committed is True
+
+
 def test_build_commit_message_limits_identifier_list():
     message = build_commit_message(operation="review", identifiers=["a", "b", "c", "d"])
 
@@ -369,6 +391,15 @@ def test_parse_porcelain_status_handles_rename():
     result = _parse_porcelain_status("R  old.md -> new.md\n")
     assert "old.md" in result
     assert "new.md" in result
+
+
+# _parse_porcelain_status: rename with empty new path (301->300 branch)
+
+def test_parse_porcelain_status_rename_empty_new_path():
+    # "old.md -> " produces new_path="" → if path: is False → skipped
+    result = _parse_porcelain_status("R  old.md -> \n")
+    assert "old.md" in result
+    assert "" not in result
 
 
 # _parse_porcelain_status: empty path_text (304->293)

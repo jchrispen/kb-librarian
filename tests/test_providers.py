@@ -3933,3 +3933,213 @@ def test_call_with_provider_policy_transient_error_no_fallback(tmp_path):
             call=call,
             provider_factory=factory,
         )
+
+
+# --- provider_seams.py coverage gap tests ---
+
+from kb_librarian.provider_seams import (
+    ProviderSeam, _reject_conflicting_fields, _resolve_mock_provider_seam,
+    _unsupported_runtime_message, provider_seam_supported_for_runtime,
+    resolve_provider_seam, validate_provider_seam_config,
+)
+
+def _err(msg: str) -> Exception:
+    return ValueError(msg)
+
+
+# validate_provider_seam_config: unknown provider name → 57->exit (no-op)
+
+def test_validate_provider_seam_config_unknown_provider_noop():
+    # provider_name not in the known set → function exits without calling resolve
+    validate_provider_seam_config(
+        "openai",
+        {"backend": "direct_http"},
+        error_factory=_err,
+        error_prefix="providers.openai",
+    )  # should not raise
+
+
+# resolve_provider_seam: config is not a Mapping (line 76)
+
+def test_resolve_provider_seam_non_mapping_raises():
+    with pytest.raises(ValueError, match="must be a mapping"):
+        resolve_provider_seam(
+            "anthropic",
+            "not-a-mapping",  # type: ignore[arg-type]
+            error_factory=_err,
+            error_prefix="providers.anthropic",
+        )
+
+
+# resolve_provider_seam: unknown provider returns generic seam (lines 109-116)
+
+def test_resolve_provider_seam_unknown_provider():
+    seam = resolve_provider_seam(
+        "openai",
+        {"backend": "direct_http"},
+        error_factory=_err,
+        error_prefix="providers.openai",
+    )
+    assert seam.provider_name == "openai"
+    assert seam.backend == "direct_http"
+
+
+# provider_seam_supported_for_runtime: codex with unsupported seam (line 136)
+
+def test_provider_seam_supported_codex_unsupported():
+    seam = ProviderSeam(provider_name="codex", backend="direct_http", credential_source="vendor_cli")
+    supported, msg = provider_seam_supported_for_runtime(seam)
+    assert not supported
+    assert "Codex" in msg
+
+
+# provider_seam_supported_for_runtime: local with unsupported seam (line 140)
+
+def test_provider_seam_supported_local_unsupported():
+    seam = ProviderSeam(provider_name="local", backend="direct_http", credential_source="api_key_env")
+    supported, msg = provider_seam_supported_for_runtime(seam)
+    assert not supported
+    assert "local backends" in msg
+
+
+# provider_seam_supported_for_runtime: mock with unsupported seam (lines 144-145)
+
+def test_provider_seam_supported_mock_unsupported():
+    seam = ProviderSeam(provider_name="mock", backend="direct_http", credential_source="api_key_env")
+    supported, msg = provider_seam_supported_for_runtime(seam)
+    assert not supported
+    assert "Mock" in msg
+
+
+# _resolve_cloud_provider_seam: unsupported credential_source string (lines 175-181)
+
+def test_resolve_cloud_provider_seam_unsupported_credential_source():
+    with pytest.raises(ValueError, match="must be one of"):
+        resolve_provider_seam(
+            "anthropic",
+            {"credential_source": "invalid_source"},
+            error_factory=_err,
+            error_prefix="providers.anthropic",
+        )
+
+
+# _resolve_cloud_provider_seam: api_key_env not set with api_key_env credential (line 211)
+
+def test_resolve_cloud_provider_seam_missing_api_key_env():
+    with pytest.raises(ValueError, match="api_key_env is required"):
+        resolve_provider_seam(
+            "anthropic",
+            {"backend": "direct_http", "credential_source": "api_key_env"},
+            error_factory=_err,
+            error_prefix="providers.anthropic",
+        )
+
+
+# _resolve_cloud_provider_seam: token_env not set with token_env credential (line 235)
+
+def test_resolve_cloud_provider_seam_missing_token_env():
+    with pytest.raises(ValueError, match="token_env is required"):
+        resolve_provider_seam(
+            "anthropic",
+            {"backend": "vendor_cli", "credential_source": "token_env"},
+            error_factory=_err,
+            error_prefix="providers.anthropic",
+        )
+
+
+# 242->256: credential_source is not "command" → branch to line 256 (already covered by other tests)
+# Line 244: credential_command is required when credential_source is "command"
+
+def test_resolve_cloud_provider_seam_missing_credential_command():
+    with pytest.raises(ValueError, match="credential_command is required"):
+        resolve_provider_seam(
+            "anthropic",
+            {"backend": "direct_http", "credential_source": "command"},
+            error_factory=_err,
+            error_prefix="providers.anthropic",
+        )
+
+
+# cli_command conflicts with non-CLI credential sources.
+
+def test_resolve_cloud_provider_seam_cli_command_conflicts_with_api_key_env():
+    with pytest.raises(ValueError, match="cli_command conflicts with credential_source 'api_key_env'"):
+        resolve_provider_seam(
+            "anthropic",
+            {
+                "backend": "direct_http",
+                "credential_source": "api_key_env",
+                "api_key_env": "ANTHROPIC_KEY",
+                "cli_command": "/usr/bin/claude",
+            },
+            error_factory=_err,
+            error_prefix="providers.anthropic",
+        )
+
+
+# _resolve_mock_provider_seam: wrong backend (line 316)
+
+def test_resolve_mock_provider_seam_wrong_backend():
+    with pytest.raises(ValueError, match="backend must be 'mock'"):
+        resolve_provider_seam(
+            "mock",
+            {"backend": "direct_http"},
+            error_factory=_err,
+            error_prefix="providers.mock",
+        )
+
+
+# _resolve_mock_provider_seam: credential_source set (line 318)
+
+def test_resolve_mock_provider_seam_credential_source_rejected():
+    with pytest.raises(ValueError, match="credential_source is not supported"):
+        resolve_provider_seam(
+            "mock",
+            {"credential_source": "api_key_env"},
+            error_factory=_err,
+            error_prefix="providers.mock",
+        )
+
+
+# _reject_conflicting_fields: unsupported_label path (line 366)
+
+def test_reject_conflicting_fields_with_unsupported_label():
+    with pytest.raises(ValueError, match="not supported for test providers"):
+        _reject_conflicting_fields(
+            _err, "providers.mock", "not_applicable",
+            configured_fields={"api_key_env": "MY_KEY"},
+            unsupported_label="test providers",
+        )
+
+
+# _unsupported_runtime_message: codex branch (line 382)
+
+def test_unsupported_runtime_message_codex():
+    seam = ProviderSeam(provider_name="codex", backend="vendor_cli", credential_source="api_key_env")
+    msg = _unsupported_runtime_message(seam)
+    assert "Codex" in msg
+    assert "not implemented yet" in msg
+
+
+# _unsupported_runtime_message: local branch (line 389-390)
+
+def test_unsupported_runtime_message_local():
+    seam = ProviderSeam(provider_name="local", backend="custom", credential_source=None)
+    msg = _unsupported_runtime_message(seam)
+    assert "ollama" in msg
+
+
+# _unsupported_runtime_message: mock branch (lines 391-392)
+
+def test_unsupported_runtime_message_mock():
+    seam = ProviderSeam(provider_name="mock", backend="other", credential_source=None)
+    msg = _unsupported_runtime_message(seam)
+    assert "Mock" in msg
+
+
+# _unsupported_runtime_message: unknown provider fallback (line 393)
+
+def test_unsupported_runtime_message_unknown():
+    seam = ProviderSeam(provider_name="unknown_provider", backend="x", credential_source=None)
+    msg = _unsupported_runtime_message(seam)
+    assert "unsupported runtime configuration" in msg
