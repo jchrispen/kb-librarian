@@ -693,3 +693,83 @@ def test_remove_empty_parents_stops_when_directory_is_not_empty(tmp_path):
     _remove_empty_parents(child, stop=stop)
 
     assert child.exists()
+
+
+# --- New coverage tests for missing branches ---
+
+def test_coerce_sources_skips_non_mapping_items():
+    # Branch 541->540: item in list is NOT a Mapping, so it is skipped.
+    from kb_librarian.compaction import _coerce_sources
+
+    result = _coerce_sources(["not-a-dict", {"type": "manual"}, 42, None])
+    assert result == [{"type": "manual"}]
+
+
+def test_pair_reasons_body_score_below_threshold(tmp_path):
+    # Branch 628->631: body_score < 0.18, so "body term overlap" is not added.
+    _write_note(
+        tmp_path,
+        note_id="2026-05-05-bsl-left",
+        title="Alpha context retrieval",
+        body="unique alpha words only here",
+        phrases=["left phrase"],
+        tags=["distinct-left"],
+    )
+    _write_note(
+        tmp_path,
+        note_id="2026-05-05-bsl-right",
+        title="Beta context ranking",
+        body="completely different zebra lion tiger",
+        phrases=["right phrase"],
+        tags=["distinct-right"],
+    )
+    records = load_note_records(tmp_path)
+    left = next(r for r in records if r.note_id == "2026-05-05-bsl-left")
+    right = next(r for r in records if r.note_id == "2026-05-05-bsl-right")
+
+    reasons = _pair_reasons(left, right, backlinks={}, usage_pairs={}, merge_pairs={})
+
+    assert not any("body term overlap" in r for r in reasons)
+
+
+def test_component_evidence_with_empty_pair_reasons(tmp_path):
+    # Branch 648->646: pair exists in edge_evidence but reasons list is empty;
+    # the if-reasons check is False so falls back to record-level evidence.
+    _write_note(tmp_path, note_id="2026-05-05-cev-a", title="CEV A")
+    _write_note(tmp_path, note_id="2026-05-05-cev-b", title="CEV B")
+    records = load_note_records(tmp_path)
+    pair_key = ("2026-05-05-cev-a", "2026-05-05-cev-b")
+
+    evidence = _component_evidence(records, {pair_key: []})
+
+    # No pair-level evidence was added, so falls back to per-record evidence (2 entries).
+    assert len(evidence) == 2
+    assert any("2026-05-05-cev-a" in e for e in evidence)
+    assert any("2026-05-05-cev-b" in e for e in evidence)
+
+
+def test_existing_compaction_proposal_cluster_id_mismatch(tmp_path, monkeypatch):
+    # Branch 725->719: proposal item found but cluster_id doesn't match → returns None.
+    monkeypatch.setattr(
+        "kb_librarian.compaction.ensure_review_state",
+        lambda *args, **kwargs: {
+            "items": [
+                {
+                    "id": "compaction-wrong-cluster",
+                    "queue": "compaction",
+                    "payload": {
+                        "kind": "proposal",
+                        "cluster_id": "cluster-other",
+                        "source_note_ids": ["2026-05-05-a", "2026-05-05-b"],
+                    },
+                }
+            ]
+        },
+    )
+
+    result = _existing_compaction_proposal_id(
+        tmp_path,
+        cluster_id="cluster-wanted",
+        source_note_ids=["2026-05-05-a", "2026-05-05-b"],
+    )
+    assert result is None

@@ -58,6 +58,26 @@ def test_require_clean_worktree_raises_when_git_status_fails(tmp_path):
             require_clean_worktree(tmp_path, force=False, operation="test-op")
 
 
+def test_require_clean_worktree_raises_when_worktree_is_dirty(tmp_path):
+    # Branch 34->exit: status.stdout.strip() is truthy (dirty worktree output).
+    def fake_run(args, **kwargs):
+        if "rev-parse" in args:
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = str(tmp_path) + "\n"
+            return result
+        if "status" in args:
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "M some_file.py\n"
+            return result
+        return MagicMock(returncode=0, stdout="")
+
+    with patch("subprocess.run", side_effect=fake_run):
+        with pytest.raises(KBLibrarianError, match="requires a clean git worktree"):
+            require_clean_worktree(tmp_path, force=False, operation="test-op")
+
+
 def test_atomic_write_note_cleans_up_temp_file_on_replace_failure(tmp_path):
     # When os.replace fails mid-write, the finally block must unlink the temp file.
     note_path = tmp_path / "test-note.md"

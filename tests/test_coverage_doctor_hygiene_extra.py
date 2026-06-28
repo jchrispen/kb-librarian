@@ -570,3 +570,82 @@ def test_hygiene_remaining_usage_orphan_backlink_and_helper_branches(tmp_path, m
     ) == {"2026-02-03-nested", "2026-02-04-body"}
     assert hygiene._string_list([" a ", "", 3]) == ["a", "3"]
     assert hygiene._is_weak_retrieval({"top_score": object(), "result_count": object()}) is False
+
+
+# --- New coverage tests for missing branches ---
+
+def test_check_review_state_no_missing_targets(tmp_path):
+    # Branch 418->409: missing_targets is empty when all target_notes exist in note_ids.
+    initialize_data_dir(tmp_path)
+    review_path = tmp_path / "review" / "review-items.json"
+    review_path.write_text(
+        json.dumps(
+            {
+                "version": STATE_VERSION,
+                "items": [
+                    {
+                        "id": "stale-valid-1",
+                        "queue": "stale",
+                        "status": "pending",
+                        "priority": "medium",
+                        "title": "Valid target note",
+                        "created": "2026-01-01",
+                        "updated": "2026-01-01",
+                        "target_notes": ["2026-01-01-extra"],
+                        "proposed_action": "reverify or refresh note",
+                        "payload": {},
+                        "history": [],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    findings: list[doctor.DoctorFinding] = []
+
+    doctor._check_review_state(tmp_path, {"2026-01-01-extra"}, findings)
+
+    codes = _codes(findings)
+    assert "review-target-missing" not in codes
+
+
+def test_provider_routes_anthropic_with_unrecognized_backend(monkeypatch):
+    # Branch 845->772: anthropic provider with backend that is neither
+    # "direct_http" nor "vendor_cli" — both inner elif branches are False.
+    from types import SimpleNamespace
+
+    def fake_runtime(provider_name, provider_config):
+        return ProviderSeam(provider_name, "custom_backend", None), None
+
+    def fake_routes(_config, operation):
+        return [SimpleNamespace(provider="anthropic", model="m")]
+
+    monkeypatch.setattr(doctor, "provider_runtime_support", fake_runtime)
+    monkeypatch.setattr(doctor, "operation_routes", fake_routes)
+
+    findings: list[doctor.DoctorFinding] = []
+    doctor._check_provider_routes(
+        {
+            "providers": {"anthropic": {}},
+            "operations": {"ingest": {}},
+        },
+        {},
+        findings,
+    )
+
+    codes = _codes(findings)
+    assert "provider-seam" in codes
+    assert not any(c.startswith("anthropic-cli") for c in codes)
+    assert "provider-api-key-unset" not in codes
+
+
+def test_generated_index_page_files_without_topics_root(tmp_path):
+    # Branch 1126->1128: topics_root does not exist, so only root-level pages are returned.
+    (tmp_path / "INDEX-001.md").write_text("generated\n", encoding="utf-8")
+    (tmp_path / "INDEX-draft.md").write_text("user\n", encoding="utf-8")
+    # Do NOT create tmp_path / "topics"
+
+    pages = doctor._generated_index_page_files(tmp_path)
+
+    assert len(pages) == 1
+    assert pages[0].name == "INDEX-001.md"

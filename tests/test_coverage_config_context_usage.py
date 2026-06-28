@@ -1083,3 +1083,130 @@ def test_usage_promotes_repeated_and_high_value_search_miss_groups(tmp_path):
     assert _miss_reason(result_count=2, top_score=5.0, report_miss=True) == "reported-poor-result"
     assert _normalized_query("!!!") == "!!!"
     assert _returned_note_ids({"returned_note_ids": "bad"}) == []
+
+
+# --- New coverage tests for missing branches ---
+
+def test_resolve_provider_seam_credential_source_command_happy_path():
+    # Branch 242->256: CREDENTIAL_SOURCE_COMMAND path with valid credential_command,
+    # no cli_command, backend=BACKEND_DIRECT_HTTP — should succeed without raising.
+    from kb_librarian.config import ConfigError
+
+    seam = resolve_provider_seam(
+        "anthropic",
+        {
+            "backend": BACKEND_DIRECT_HTTP,
+            "credential_source": CREDENTIAL_SOURCE_COMMAND,
+            "credential_command": "get-token",
+        },
+        error_factory=ConfigError,
+        error_prefix="providers.anthropic",
+    )
+
+    assert seam.backend == BACKEND_DIRECT_HTTP
+    assert seam.credential_source == CREDENTIAL_SOURCE_COMMAND
+    # Line 257 (backend != BACKEND_VENDOR_CLI and cli_command is not None) is
+    # GENUINELY UNREACHABLE: any BACKEND_DIRECT_HTTP path with cli_command set
+    # would already have raised via _reject_conflicting_fields before reaching 257.
+
+
+def test_summarize_usage_note_id_filter_rejects_non_matching_events(tmp_path):
+    # Branches 233->235, 237->239, 240->231, 241->231:
+    # retrieval/note-use/suspect-flag events that don't match the note_id filter,
+    # and an unknown event type that falls through all conditions.
+    import json as _json
+    usage_path = tmp_path / ".kb" / "usage.log"
+    usage_path.parent.mkdir()
+    usage_path.write_text(
+        "\n".join(
+            [
+                # retrieval not containing "target-note" (233->235 False branch)
+                _json.dumps({"event": "retrieval", "returned_note_ids": ["other-note"], "command": "search"}),
+                # note-use with wrong note_id (237->239 False branch)
+                _json.dumps({"event": "note-use", "note_id": "other-note"}),
+                # suspect-flag with wrong note_id (241->231 False branch)
+                _json.dumps({"event": "suspect-flag", "note_id": "other-note", "reason": "wrong"}),
+                # unknown event type — reaches 240, condition False, goes to 231
+                _json.dumps({"event": "custom-unknown-event"}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    summary = summarize_usage(tmp_path, since=None, note_id="target-note")
+
+    assert summary.retrieval_count == 0
+    assert summary.logged_use_count == 0
+    assert summary.suspect_flags == []
+
+
+def test_summarize_usage_note_use_with_empty_note_id_not_counted(tmp_path):
+    # Branch 255->253: note-use event with empty note_id — logged to note_use_events
+    # but skipped when building used_counter because used_id is falsy.
+    import json as _json
+    usage_path = tmp_path / ".kb" / "usage.log"
+    usage_path.parent.mkdir()
+    usage_path.write_text(
+        _json.dumps({"event": "note-use", "note_id": ""}) + "\n",
+        encoding="utf-8",
+    )
+
+    summary = summarize_usage(tmp_path, since=None, note_id=None)
+
+    # Event is in note_use_events (counted), but not added to used_counter (empty ID).
+    assert summary.logged_use_count == 1
+    assert summary.used_notes == {}
+
+
+def test_note_usage_counts_skips_unknown_event_and_empty_note_id(tmp_path):
+    # Branch 364->360: unknown event type is skipped.
+    # Branch 366->360: note-use event with empty note_id is not counted.
+    import json as _json
+    usage_path = tmp_path / ".kb" / "usage.log"
+    usage_path.parent.mkdir()
+    usage_path.write_text(
+        "\n".join(
+            [
+                # Unknown event type — not "retrieval" or "note-use" (364->360)
+                _json.dumps({"event": "suspect-flag", "note_id": "some-note"}),
+                # note-use with empty note_id — empty string skipped (366->360)
+                _json.dumps({"event": "note-use", "note_id": "   "}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    counts = note_usage_counts(tmp_path)
+
+    assert counts == {}
+
+
+def test_promote_search_misses_when_upsert_returns_none(tmp_path, monkeypatch):
+    # Branch 209->204: _upsert_search_miss_item returns None, so item_id is not
+    # appended and the loop continues to the next group.
+    import json as _json
+    misses_path = tmp_path / ".kb" / "search-misses.log"
+    misses_path.parent.mkdir()
+    # Write 3 identical misses to meet the repeat threshold.
+    events = [
+        {"event": "search-miss", "query": "test missing query", "timestamp": f"2026-06-01T10:0{i}:00",
+         "command": "context", "reason": "zero-results", "result_count": 0,
+         "top_score": None, "high_value": False, "filters": {}}
+        for i in range(3)
+    ]
+    misses_path.write_text("\n".join(_json.dumps(e) for e in events) + "\n", encoding="utf-8")
+
+    monkeypatch.setattr("kb_librarian.usage._upsert_search_miss_item", lambda *args, **kwargs: None)
+
+    promoted = promote_search_misses(tmp_path)
+
+    assert promoted == []
+
+    # usage:334->337 is GENUINELY UNREACHABLE: the if-chain for unit in [m/h/d/w]
+    # is exhaustive — if the regex matched, unit is always one of those 4 values,
+    # so the False branch of 'if unit == "w":' can never be reached.
+    # usage:345 is UNREACHABLE in Python 3.11+: datetime.fromisoformat() now
+    # accepts date-only strings like "2026-06-01", so the try block at line 338
+    # always succeeds and line 345 (datetime.combine fallback) is never executed.

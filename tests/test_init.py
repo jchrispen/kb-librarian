@@ -9,7 +9,9 @@ from kb_librarian.init import (
     HOOK_TEMPLATES,
     LEGACY_PREAMBLE_CONTENT,
     initialize_data_dir,
+    render_hooks_guidance,
     render_preamble,
+    render_preamble_guidance,
 )
 from kb_librarian.paths import DIRECTORIES, LOG_FILES, REVIEW_QUEUE_FILES, REVIEW_STATE_FILE, ROOT_FILES, STATE_FILES
 
@@ -184,3 +186,21 @@ def test_managed_preamble_detected_by_prefix_and_tail(tmp_path):
     preamble_b = path_b / "PREAMBLE.md"
     assert preamble_b in created
     assert str(path_b) in preamble_b.read_text(encoding="utf-8")
+
+
+def test_render_preamble_guidance_contains_path_and_preamble_hint(tmp_path):
+    # Lines 222-223: render_preamble_guidance returns a string mentioning the
+    # preamble path and guidance for including it in agent sessions.
+    result = render_preamble_guidance(tmp_path)
+
+    assert "preamble" in result.lower()
+    assert str(tmp_path) in result
+
+
+def test_render_hooks_guidance_contains_hook_templates_header(tmp_path):
+    # Lines 233-235: render_hooks_guidance returns a string mentioning hook
+    # templates and their directory path.
+    result = render_hooks_guidance(tmp_path)
+
+    assert "Hook templates" in result
+    assert str(tmp_path) in result

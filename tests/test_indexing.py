@@ -529,3 +529,39 @@ def test_score_document_exact_id_match_boosts_score():
     score = score_document(doc, query=note_id, tokens=tokens, weights={})
     # Exact id match adds 10_000 to score
     assert score >= 10_000.0
+
+
+def test_reindex_with_scan_clusters_calls_compaction_and_hygiene_queues(tmp_path, monkeypatch):
+    # Lines 106-115: scan_clusters=True triggers scan_compaction_clusters and
+    # scan_hygiene_queues imports and calls inside reindex_data_dir.
+    from types import SimpleNamespace
+
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    config["providers"]["mock"] = {}
+    config["operations"]["compact"] = {"provider": "mock", "model": "mock"}
+
+    compaction_called = []
+    hygiene_called = []
+
+    monkeypatch.setattr(
+        "kb_librarian.compaction.scan_compaction_clusters",
+        lambda data_dir, *, config: (
+            compaction_called.append(data_dir)
+            or SimpleNamespace(clusters=[], review_item_ids=[])
+        ),
+    )
+    monkeypatch.setattr(
+        "kb_librarian.hygiene.scan_hygiene_queues",
+        lambda data_dir, *, config: (
+            hygiene_called.append(data_dir)
+            or SimpleNamespace(stale_item_ids=[], orphan_item_ids=[], low_utility_item_ids=[])
+        ),
+    )
+
+    result = reindex_data_dir(tmp_path, config=config, scan_clusters=True)
+
+    assert result.maintenance_scan is True
+    assert result.compaction_clusters == 0
+    assert compaction_called == [tmp_path]
+    assert hygiene_called == [tmp_path]
