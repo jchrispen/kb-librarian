@@ -28,7 +28,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 addopts = [
     "--cov=kb_librarian",
-    "--cov-report=term-missing:skip-covered",
 ]
 pythonpath = ["src"]
 testpaths = ["tests"]

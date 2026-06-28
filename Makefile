@@ -8,7 +8,7 @@ VENV := .venv
 PY := $(VENV)/bin/python
 
 .DEFAULT_GOAL := help
-.PHONY: help all venv clean clean-venv clean-all build test
+.PHONY: help all venv clean clean-venv clean-all build test coverage
 
 help: ## Show this help
 	@grep -hE '^[a-z][a-z-]*:.*?## ' $(MAKEFILE_LIST) | \
@@ -40,4 +40,9 @@ build: clean venv ## Build wheel + sdist into dist/
 	$(PY) -m build
 
 test: venv ## Run the test suite
-	$(PY) -m pytest --color=yes
+	$(PY) -m pytest --color=yes --cov-report=
+	$(MAKE) coverage
+
+coverage: venv ## Show the last test coverage report
+	@test -f build/coverage/.coverage || { echo "No coverage data; run make test first."; exit 1; }
+	$(PY) -m coverage report --data-file=build/coverage/.coverage --no-skip-covered
