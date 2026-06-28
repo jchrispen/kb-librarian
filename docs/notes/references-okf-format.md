@@ -15,14 +15,15 @@ crawl in the critical path, which contradicts the local-first / no-network
 constraint in [the agent-first ADR](../../adrs/2026-05-09-agent-first-architecture.md).
 It also has no retrieval engine, which is kb-librarian's actual value.
 
-## Ideas worth keeping (deferred, not scoped)
+## Ideas worth keeping
 
 1. **`SPEC.md` as an interchange/export target.** If note portability to other
    tools ever becomes a goal, OKF's bundle schema is a ready-made vendor-neutral
    format to export to instead of inventing one. No export format is in scope or
    the deferred backlog today.
-2. **Concept graph + backlinks + static visualizer.** OKF models explicit
-   inter-concept relationships and ships a single-file Cytoscape.js force-directed
-   graph viewer. We have a topic tree and `INDEX.md` but no explicit backlinks or
-   visualization; this loosely maps to the deferred "TUI/web review" item. The
-   single static-HTML + Cytoscape.js pattern is a cheap, dependency-light option.
+
+## Adopted since capture
+
+- **Concept graph + backlinks + static visualizer.** KB Librarian now derives
+  reference/backlink graph edges and can write an optional interactive HTML
+  visualization via `kb graph --html PATH`.
