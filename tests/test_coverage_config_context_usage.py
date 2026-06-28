@@ -2,11 +2,24 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
-from kb_librarian.config import ConfigError, default_config, load_config, read_config_file, validate_config
+from kb_librarian.config import (
+    ConfigError,
+    _validate_positive_int,
+    _operation_provider,
+    _policy_default_provider,
+    _validate_provider_policy,
+    default_config,
+    load_config,
+    read_config_file,
+    render_config,
+    resolve_data_dir,
+    validate_config,
+)
 from kb_librarian.context import (
     ContextSelection,
     _apply_context_budget,
@@ -14,13 +27,17 @@ from kb_librarian.context import (
     _confidence_score,
     _coerce_string_list,
     _load_backlinks,
+    _log_provider_fallback_event,
     _recency_score,
     _related_explore_selection,
+    _related_note_ids,
     _score_explore_record,
     _score_record,
     _status_score,
     _trim_to_tokens,
     _trust_flags,
+    build_context,
+    build_explore,
 )
 from kb_librarian.errors import KBLibrarianError
 from kb_librarian.notes import Note
@@ -29,12 +46,20 @@ from kb_librarian.provider_seams import (
     BACKEND_VENDOR_CLI,
     CREDENTIAL_SOURCE_API_KEY_ENV,
     CREDENTIAL_SOURCE_COMMAND,
+    CREDENTIAL_SOURCE_TOKEN_ENV,
+    CREDENTIAL_SOURCE_VENDOR_CLI,
     ProviderSeam,
     provider_seam_supported_for_runtime,
+    resolve_provider_seam,
 )
+from kb_librarian.providers import ProviderFallbackEvent
 from kb_librarian.storage import NoteRecord
 from kb_librarian.usage import (
     _clean_mapping,
+    _normalized_query,
+    _now_iso,
+    _parse_timestamp,
+    _returned_note_ids,
     _miss_reason,
     _read_jsonl,
     log_search_miss,
@@ -111,6 +136,23 @@ def test_load_config_uses_defaults_when_no_config_file_exists(tmp_path):
     assert loaded["data_dir"] == str(data_dir)
 
 
+def test_resolve_data_dir_reads_control_dir_and_configured_library(tmp_path):
+    control_dir = tmp_path / ".kb"
+    assert resolve_data_dir(control_dir, env={}, default_data_dir=tmp_path) == control_dir / ".library"
+
+    configured = default_config(tmp_path / "configured-library")
+    config_path = control_dir / "config.yaml"
+    # Keep the fixture grounded in the default shape while still exercising
+    # the configured data-dir branch.
+    config_path.parent.mkdir()
+    config_path.write_text(render_config(configured), encoding="utf-8")
+
+    assert resolve_data_dir(env={}, default_data_dir=tmp_path) == tmp_path / "configured-library"
+
+    config_path.write_text("data_dir: ''\n", encoding="utf-8")
+    assert resolve_data_dir(env={}, default_data_dir=tmp_path) == tmp_path / ".kb" / ".library"
+
+
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [
@@ -138,6 +180,39 @@ def test_validate_config_rejects_edge_shape_errors(tmp_path, mutate, message):
 
     with pytest.raises(ConfigError, match=message):
         validate_config(config)
+
+
+def test_validate_config_covers_optional_numeric_absent_and_invalid_edges(tmp_path):
+    config = default_config(tmp_path)
+    config["providers"]["anthropic"].pop("timeout_seconds", None)
+    config["providers"]["retry"].pop("base_delay_seconds", None)
+    config["providers"]["retry"].pop("max_delay_seconds", None)
+    config["providers"]["retry"].pop("jitter_seconds", None)
+    validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["anthropic"]["timeout_seconds"] = True
+    with pytest.raises(ConfigError, match="timeout_seconds"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["retry"]["base_delay_seconds"] = -0.1
+    with pytest.raises(ConfigError, match="base_delay_seconds"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["retrieval"]["default_budget_tokens"] = True
+    with pytest.raises(ConfigError, match="default_budget_tokens"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["policy"] = None
+    validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["policy"]["fallback"] = {"extract": []}
+    validate_config(config)
+    _validate_positive_int({}, "section.value", minimum=1)
 
 
 def test_validate_config_rejects_non_mapping_root():
@@ -168,6 +243,41 @@ def test_validate_config_rejects_provider_section_edges(tmp_path, provider_updat
         validate_config(config)
 
 
+def test_validate_config_covers_codex_local_and_privacy_tail_edges(tmp_path):
+    config = default_config(tmp_path)
+    config["providers"]["codex"] = {
+        "backend": "vendor_cli",
+        "credential_source": "vendor_cli",
+        "base_url": "https://proxy.example.test/v1",
+    }
+    with pytest.raises(ConfigError, match="must remain"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["codex"] = {
+        "backend": "vendor_cli",
+        "credential_source": "vendor_cli",
+        "base_url": "https://api.openai.com/v1",
+        "organization": "org-test",
+    }
+    with pytest.raises(ConfigError, match="providers.codex.organization is supported only"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["local"] = {
+        "backend": "ollama",
+        "base_url": "http://localhost:11434",
+        "timeout_seconds": True,
+    }
+    with pytest.raises(ConfigError, match="local.timeout_seconds"):
+        validate_config(config)
+
+    config = default_config(tmp_path)
+    config["privacy"]["require_confirmation_for_cloud_llm"] = "yes"
+    with pytest.raises(ConfigError, match="require_confirmation"):
+        validate_config(config)
+
+
 def test_validate_config_rejects_policy_without_default_provider_for_implicit_operation(tmp_path):
     config = default_config(tmp_path)
     config["providers"]["policy"]["default_provider"] = None
@@ -182,6 +292,14 @@ def test_validate_config_accepts_absent_optional_index_and_retry_sections(tmp_pa
     del config["indexes"]["topic_page_size"]
     del config["indexes"]["top_level_page_size"]
     del config["providers"]["retry"]
+
+    validate_config(config)
+
+
+def test_validate_config_accepts_absent_optional_codex_and_local_sections(tmp_path):
+    config = default_config(tmp_path)
+    del config["providers"]["codex"]
+    del config["providers"]["local"]
 
     validate_config(config)
 
@@ -206,6 +324,26 @@ def test_validate_config_rejects_empty_policy_default_and_project_edges(tmp_path
         "timeout_seconds": 120,
     }
     with pytest.raises(ConfigError, match="providers.codex.project is supported only"):
+        validate_config(config)
+
+
+def test_config_policy_helpers_cover_non_mapping_and_default_provider_edges(tmp_path):
+    _validate_provider_policy({"providers": [], "operations": {}})
+    _validate_provider_policy({"providers": {}, "operations": []})
+    assert _policy_default_provider({"policy": []}) is None
+    assert _operation_provider([], {"policy": {"default_provider": "codex"}}) is None
+    assert _operation_provider({}, {"policy": {"default_provider": "codex"}}) == "codex"
+
+    config = default_config(tmp_path)
+    config["providers"]["mock"] = {}
+    config["operations"]["extract"] = {"model": "mock-model"}
+    config["providers"]["policy"]["default_provider"] = "mock"
+    validate_config(config)
+
+    config = default_config(tmp_path)
+    config["providers"]["mock"] = {}
+    config["providers"]["policy"]["fallback"] = {"extract": [{"provider": "   "}]}
+    with pytest.raises(ConfigError, match="must be a provider string"):
         validate_config(config)
 
 
@@ -300,6 +438,57 @@ def test_provider_seam_runtime_supports_codex_vendor_cli_and_rejects_token_env()
     assert "Supported Codex seams" in str(unsupported_message)
 
 
+def test_provider_seam_resolver_rejects_vendor_cli_field_conflicts_and_cli_command_backend():
+    with pytest.raises(ConfigError, match="api_key_env"):
+        resolve_provider_seam(
+            "codex",
+            {
+                "backend": BACKEND_VENDOR_CLI,
+                "credential_source": CREDENTIAL_SOURCE_VENDOR_CLI,
+                "api_key_env": "OPENAI_API_KEY",
+            },
+            error_factory=ConfigError,
+            error_prefix="providers.codex",
+        )
+
+    with pytest.raises(ConfigError, match="cli_command"):
+        resolve_provider_seam(
+            "anthropic",
+            {
+                "backend": BACKEND_DIRECT_HTTP,
+                "credential_source": CREDENTIAL_SOURCE_API_KEY_ENV,
+                "api_key_env": "ANTHROPIC_API_KEY",
+                "cli_command": "claude",
+            },
+            error_factory=ConfigError,
+            error_prefix="providers.anthropic",
+        )
+
+
+def test_provider_seam_resolver_rejects_missing_command_credentials():
+    with pytest.raises(ConfigError, match="credential_command is required"):
+        resolve_provider_seam(
+            "anthropic",
+            {
+                "backend": BACKEND_DIRECT_HTTP,
+                "credential_source": CREDENTIAL_SOURCE_COMMAND,
+            },
+            error_factory=ConfigError,
+            error_prefix="providers.anthropic",
+        )
+
+    with pytest.raises(ConfigError, match="token_env is required"):
+        resolve_provider_seam(
+            "anthropic",
+            {
+                "backend": BACKEND_VENDOR_CLI,
+                "credential_source": CREDENTIAL_SOURCE_TOKEN_ENV,
+            },
+            error_factory=ConfigError,
+            error_prefix="providers.anthropic",
+        )
+
+
 def test_context_scoring_filters_weak_trust_flags_and_scores_risk_branches(tmp_path):
     base = {
         "id": "2026-06-01-risk-note",
@@ -342,19 +531,186 @@ def test_context_scoring_filters_weak_trust_flags_and_scores_risk_branches(tmp_p
     assert "confidence:low" in strong.trust_flags
 
 
+def test_context_build_early_returns_and_related_note_extraction(tmp_path, monkeypatch):
+    config = default_config(tmp_path)
+    monkeypatch.setattr("kb_librarian.context.retry_policy_from_config", lambda config: object())
+    monkeypatch.setattr("kb_librarian.context.reindex_data_dir", lambda data_dir: None)
+
+    monkeypatch.setattr("kb_librarian.context.load_note_records", lambda *args, **kwargs: [])
+    empty = build_context(tmp_path, config=config, task="task", mode="coding", budget=100)
+    empty_explore = build_explore(tmp_path, config=config, problem="problem", budget=100)
+    assert empty.selected_notes == []
+    assert empty.message
+    assert empty_explore.selected_notes == []
+    assert empty_explore.message
+
+    active = _record(
+        tmp_path,
+        frontmatter={
+            "id": "2026-06-01-active",
+            "title": "Active",
+            "summary": "Summary",
+            "topic": "agent-systems",
+            "created": "2026-06-01",
+            "updated": "2026-06-01",
+            "knowledge_type": "other",
+            "status": "active",
+            "confidence": "high",
+            "retrieval_phrases": [],
+            "tags": [],
+            "nested": {"ref": "2026-06-01-nested"},
+        },
+        body="See 2026-06-01-body and 2026-06-01-active.",
+    )
+    archived = _record(
+        tmp_path,
+        frontmatter={
+            **active.note.frontmatter,
+            "id": "2026-06-01-archived",
+            "title": "Archived",
+            "status": "archived",
+        },
+    )
+    monkeypatch.setattr("kb_librarian.context.load_note_records", lambda *args, **kwargs: [active, archived])
+    monkeypatch.setattr(
+        "kb_librarian.context.candidate_source_from_config",
+        lambda *args, **kwargs: SimpleNamespace(candidates=lambda query: []),
+    )
+    no_candidates = build_context(tmp_path, config=config, task="task", mode="coding", budget=100)
+    assert no_candidates.message
+
+    monkeypatch.setattr(
+        "kb_librarian.context.candidate_source_from_config",
+        lambda *args, **kwargs: SimpleNamespace(
+            candidates=lambda query: [
+                {"id": ""},
+                {"id": "missing"},
+                {"id": "2026-06-01-archived"},
+                {"id": "2026-06-01-active"},
+            ]
+        ),
+    )
+    monkeypatch.setattr("kb_librarian.context.tokenize_query", lambda query: ["nomatch"])
+    no_scores = build_context(tmp_path, config=config, task="nomatch", mode="coding", budget=100)
+    assert no_scores.message
+
+    assert _related_note_ids(active, backlinks={"2026-06-01-active": ["2026-06-01-backlink"]}) == {
+        "2026-06-01-body",
+        "2026-06-01-nested",
+        "2026-06-01-backlink",
+    }
+
+
+def test_context_build_returns_empty_when_budget_filters_all_scored_notes(tmp_path, monkeypatch):
+    config = default_config(tmp_path)
+    record = _record(
+        tmp_path,
+        frontmatter={
+            "id": "2026-06-01-scored",
+            "title": "Scored",
+            "summary": "Summary",
+            "topic": "agent-systems",
+            "created": "2026-06-01",
+            "updated": "2026-06-01",
+            "knowledge_type": "technique",
+            "status": "active",
+            "confidence": "high",
+            "retrieval_phrases": ["task"],
+            "tags": [],
+        },
+    )
+    oversized = _minimal_selection("2026-06-01-scored", excerpt_words=400)
+    monkeypatch.setattr("kb_librarian.context.retry_policy_from_config", lambda config: object())
+    monkeypatch.setattr("kb_librarian.context.load_note_records", lambda *args, **kwargs: [record])
+    monkeypatch.setattr(
+        "kb_librarian.context.candidate_source_from_config",
+        lambda *args, **kwargs: SimpleNamespace(candidates=lambda query: [{"id": "2026-06-01-scored"}]),
+    )
+    monkeypatch.setattr("kb_librarian.context.tokenize_query", lambda query: ["task"])
+    monkeypatch.setattr("kb_librarian.context._score_record", lambda **kwargs: oversized)
+
+    result = build_context(tmp_path, config=config, task="task", mode="coding", budget=240)
+
+    assert result.selected_notes == []
+    assert result.message
+
+
+def test_build_explore_reindexes_and_adds_related_notes(tmp_path, monkeypatch):
+    config = default_config(tmp_path)
+    primary = _record(
+        tmp_path,
+        frontmatter={
+            "id": "2026-06-01-primary",
+            "title": "Primary",
+            "summary": "Problem adjacent summary",
+            "topic": "agent-systems",
+            "created": "2026-06-01",
+            "updated": "2026-06-01",
+            "knowledge_type": "pattern",
+            "status": "active",
+            "confidence": "high",
+            "retrieval_phrases": ["problem"],
+            "tags": [],
+        },
+        body="Links to 2026-06-01-related, 2026-06-01-archived, and 2026-06-01-missing.",
+    )
+    related = _record(
+        tmp_path,
+        frontmatter={
+            **primary.note.frontmatter,
+            "id": "2026-06-01-related",
+            "title": "Related",
+            "retrieval_phrases": [],
+        },
+    )
+    archived = _record(
+        tmp_path,
+        frontmatter={
+            **primary.note.frontmatter,
+            "id": "2026-06-01-archived",
+            "title": "Archived",
+            "status": "archived",
+            "retrieval_phrases": [],
+        },
+    )
+    reindexed: list[Path] = []
+    monkeypatch.setattr("kb_librarian.context.retry_policy_from_config", lambda config: object())
+    monkeypatch.setattr("kb_librarian.context.reindex_data_dir", lambda data_dir: reindexed.append(data_dir))
+    monkeypatch.setattr("kb_librarian.context.load_note_records", lambda *args, **kwargs: [primary, related, archived])
+    monkeypatch.setattr(
+        "kb_librarian.context.candidate_source_from_config",
+        lambda *args, **kwargs: SimpleNamespace(candidates=lambda query: [{"id": "2026-06-01-primary"}]),
+    )
+    monkeypatch.setattr(
+        "kb_librarian.context.call_with_provider_policy",
+        lambda *args, **kwargs: "synthesis",
+    )
+
+    result = build_explore(tmp_path, config=config, problem="problem", budget=300)
+
+    assert reindexed == [tmp_path]
+    assert {item.note_id for item in result.selected_notes} == {"2026-06-01-primary", "2026-06-01-related"}
+    assert result.synthesis_markdown == "synthesis"
+
+
 def test_context_helpers_cover_budget_trimming_recency_and_coercion(tmp_path):
     oversized = _minimal_selection("2026-06-01-large", excerpt_words=400)
     small = _minimal_selection("2026-06-01-small", excerpt_words=2)
 
     assert _apply_context_budget([oversized, small], 60) == [small]
     assert _apply_explore_budget([oversized, small], 0) == [oversized]
+    assert _apply_context_budget([oversized], 0) == [oversized]
     assert _apply_context_budget([oversized], 240) == []
+    assert _apply_explore_budget([oversized, small], 260) == [small]
+    second = _minimal_selection("2026-06-01-second", excerpt_words=1)
+    assert _apply_explore_budget([small, second], 100) == [small]
     assert _trim_to_tokens("one two three", 2) == "one ..."
     assert _coerce_string_list("not-list") == []
     assert _coerce_string_list([" keep ", "", 7, "also"]) == ["keep", "also"]
     assert _recency_score("bad-date") == 0.0
     assert _recency_score("2999-01-01") == 0.0
     assert _recency_score("2000-01-01") == -4.0
+    assert _recency_score((date.today() - timedelta(days=240)).isoformat()) == 0.0
     assert _trust_flags(status="active", confidence="high", staleness_risk="low") == []
     assert _status_score("superseded") == -4.0
     assert _status_score("needs-review") == -6.0
@@ -364,6 +720,7 @@ def test_context_helpers_cover_budget_trimming_recency_and_coercion(tmp_path):
     assert _confidence_score("low") == -7.0
     assert _confidence_score("unknown") == 0.0
     assert _recency_score(date.today().isoformat()) == 8.0
+    assert _recency_score((date.today() - timedelta(days=60)).isoformat()) == 4.0
 
     archived = _record(
         tmp_path,
@@ -382,6 +739,28 @@ def test_context_helpers_cover_budget_trimming_recency_and_coercion(tmp_path):
         },
     )
     assert _related_explore_selection(record=archived, data_dir=tmp_path) is None
+
+
+def test_context_budget_and_logging_cover_remaining_edges(tmp_path):
+    first = _minimal_selection("2026-06-01-first", excerpt_words=1)
+    second = _minimal_selection("2026-06-01-second", excerpt_words=1)
+    selected = _apply_context_budget([first, second], 240)
+    assert [item.note_id for item in selected] == ["2026-06-01-first", "2026-06-01-second"]
+    explore_selected = _apply_explore_budget([first, second], 300)
+    assert [item.note_id for item in explore_selected] == ["2026-06-01-first", "2026-06-01-second"]
+
+    event = ProviderFallbackEvent(
+        operation="context:synthesize",
+        provider="primary",
+        model="model-a",
+        next_provider="fallback",
+        next_model="model-b",
+        classification_kind="provider_error",
+        classification_detail="timeout",
+        error="boom",
+    )
+    _log_provider_fallback_event(tmp_path, phase="context", event=event, query="task")
+    assert "stage=provider-context-fallback" in (tmp_path / ".kb" / "errors.log").read_text(encoding="utf-8")
 
 
 def test_context_explore_scoring_covers_exact_and_medium_staleness_paths(tmp_path):
@@ -417,6 +796,80 @@ def test_context_explore_scoring_covers_exact_and_medium_staleness_paths(tmp_pat
     assert "lexical_match" in selection.reasons
     assert "staleness_medium" in selection.reasons
     assert "exploration_type_fit" in selection.reasons
+
+
+def test_context_scoring_covers_medium_staleness_and_high_explore_risk(tmp_path):
+    context_record = _record(
+        tmp_path,
+        frontmatter={
+            "id": "2026-06-01-context",
+            "title": "Task context",
+            "summary": "Task context summary",
+            "topic": "agent-systems",
+            "created": "2026-06-01",
+            "updated": date.today().isoformat(),
+            "knowledge_type": "technique",
+            "status": "active",
+            "confidence": "medium",
+            "staleness_risk": "medium",
+            "retrieval_phrases": ["task context"],
+            "tags": ["agent"],
+        },
+        body="Task context body.",
+    )
+    context_selection = _score_record(
+        task="task context",
+        tokens=["task", "context"],
+        mode="coding",
+        record=context_record,
+        data_dir=tmp_path,
+        usage_count=0,
+    )
+    explore_record = _record(
+        tmp_path,
+        frontmatter={
+            **context_record.note.frontmatter,
+            "id": "2026-06-01-explore-high",
+            "title": "Explore high",
+            "summary": "Explore high risk summary",
+            "staleness_risk": "high",
+            "retrieval_phrases": ["explore high"],
+        },
+        body="Explore high risk body.",
+    )
+    explore_selection = _score_explore_record(
+        problem="explore high",
+        tokens=["explore", "high"],
+        record=explore_record,
+        data_dir=tmp_path,
+        indexed_match=False,
+    )
+    zero_recency_record = _record(
+        tmp_path,
+        frontmatter={
+            **context_record.note.frontmatter,
+            "id": "2026-06-01-explore-zero-recency",
+            "title": "Explore zero",
+            "summary": "Explore zero recency summary",
+            "updated": (date.today() - timedelta(days=240)).isoformat(),
+            "retrieval_phrases": ["explore zero"],
+        },
+        body="Explore zero recency body.",
+    )
+    zero_recency_selection = _score_explore_record(
+        problem="explore zero",
+        tokens=["explore", "zero"],
+        record=zero_recency_record,
+        data_dir=tmp_path,
+        indexed_match=False,
+    )
+
+    assert context_selection is not None
+    assert "staleness_medium" in context_selection.reasons
+    assert explore_selection is not None
+    assert "staleness_high" in explore_selection.reasons
+    assert zero_recency_selection is not None
+    assert "recency" not in zero_recency_selection.reasons
 
 
 def test_load_backlinks_tolerates_missing_malformed_and_filters_entries(tmp_path):
@@ -515,6 +968,35 @@ def test_usage_counts_stats_and_clean_mapping_handle_edge_values(tmp_path):
         "list": ["a", "5"],
         "object": "{'nested': 'value'}",
     }
+    stats_path.write_text("{bad", encoding="utf-8")
+    refresh_usage_stats(tmp_path)
+    assert json.loads(stats_path.read_text(encoding="utf-8"))["usage"]["retrievals"] == 1
+
+    assert _parse_timestamp("") is None
+    assert "T" in _now_iso()
+
+
+def test_usage_stats_refresh_replaces_non_mapping_stats_payload(tmp_path):
+    stats_path = tmp_path / ".kb" / "stats.json"
+    stats_path.parent.mkdir()
+    stats_path.write_text("[]", encoding="utf-8")
+
+    refresh_usage_stats(tmp_path)
+
+    assert set(json.loads(stats_path.read_text(encoding="utf-8"))) == {"usage"}
+
+
+def test_usage_jsonl_reader_returns_empty_when_read_fails(tmp_path, monkeypatch):
+    log_path = tmp_path / ".kb" / "usage.log"
+    log_path.parent.mkdir()
+    log_path.write_text("{}", encoding="utf-8")
+
+    def raise_os_error(*args, **kwargs):
+        raise OSError("cannot read")
+
+    monkeypatch.setattr(type(log_path), "read_text", raise_os_error)
+
+    assert _read_jsonl(log_path) == []
 
 
 def test_usage_window_compares_timezone_aware_timestamps(tmp_path):
@@ -598,3 +1080,6 @@ def test_usage_promotes_repeated_and_high_value_search_miss_groups(tmp_path):
     assert _miss_reason(result_count=0, top_score=None, report_miss=False) == "zero-results"
     assert _miss_reason(result_count=2, top_score=0.1, report_miss=False) == "low-score"
     assert _miss_reason(result_count=2, top_score=5.0, report_miss=False) is None
+    assert _miss_reason(result_count=2, top_score=5.0, report_miss=True) == "reported-poor-result"
+    assert _normalized_query("!!!") == "!!!"
+    assert _returned_note_ids({"returned_note_ids": "bad"}) == []

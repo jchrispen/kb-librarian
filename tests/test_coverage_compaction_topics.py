@@ -13,12 +13,15 @@ from kb_librarian.compaction import (
     _dispositions_by_note_id,
     _eligible_or_supersedable_records,
     _eligible_records,
+    _existing_compaction_proposal_id,
     _jaccard,
     _list_tokens,
     _load_backlinks,
     _load_merge_pairs,
     _load_retrieval_pairs,
     _log_provider_fallback_event,
+    _pair_reasons,
+    _payload_note_ids,
     _provider_note_payload,
     _record_evidence,
     _risk,
@@ -43,6 +46,7 @@ from kb_librarian.topic_mutations import (
     _can_remove_topic_scope,
     _cleanup_old_topic_dirs,
     _copy_topic_scopes,
+    _ensure_no_overlapping_topics,
     _move_one_note,
     _moves_from_payload,
     _relative_path,
@@ -156,6 +160,31 @@ def test_detect_compaction_clusters_uses_link_usage_and_merge_signals(tmp_path):
     assert "repeated retrieval overlap 2" in clusters[0].evidence[0]
 
 
+def test_compaction_pair_reasons_cover_title_and_body_similarity_edges(tmp_path):
+    _write_note(
+        tmp_path,
+        note_id="2026-05-05-left",
+        title="Agent context retrieval",
+        body="alpha beta gamma delta epsilon",
+        phrases=["context shaping"],
+        tags=["one"],
+    )
+    _write_note(
+        tmp_path,
+        note_id="2026-05-05-right",
+        title="Agent context ranking",
+        body="alpha beta gamma delta zeta",
+        phrases=["retrieval shaping"],
+        tags=["two"],
+    )
+    left, right = load_note_records(tmp_path)
+
+    reasons = _pair_reasons(left, right, backlinks={}, usage_pairs={}, merge_pairs={})
+
+    assert "title token overlap 0.50" in reasons
+    assert "body term overlap 0.67" in reasons
+
+
 def test_compaction_helpers_cover_fallbacks_and_path_edges(tmp_path):
     record_path = _write_note(
         tmp_path,
@@ -224,6 +253,32 @@ def test_compaction_filter_and_disposition_helpers_cover_status_and_malformed_it
             ]
         }
     ) == {"2026-05-05-active": {"recommendation": "keep", "rationale": "rationale"}}
+
+
+def test_existing_compaction_proposal_lookup_skips_malformed_and_matches_legacy_ids(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "kb_librarian.compaction.ensure_review_state",
+        lambda *args, **kwargs: {
+            "items": [
+                "bad",
+                {"id": "classification-1", "queue": "classification", "payload": {}},
+                {"id": "compaction-bad-payload", "queue": "compaction", "payload": "bad"},
+                {
+                    "id": "compaction-legacy",
+                    "queue": "compaction",
+                    "target_notes": ["2026-05-05-b", "2026-05-05-a"],
+                    "payload": {"kind": "proposal", "cluster_id": "cluster-a", "cluster_note_ids": "bad"},
+                },
+            ]
+        },
+    )
+
+    assert _existing_compaction_proposal_id(
+        tmp_path,
+        cluster_id="cluster-a",
+        source_note_ids=["2026-05-05-a", "2026-05-05-b"],
+    ) == "compaction-legacy"
+    assert _payload_note_ids({"source_note_ids": "bad", "cluster_note_ids": ["one"]}, {"target_notes": ["two"]}) == ["one"]
 
 
 def test_compaction_fallback_event_is_appended_to_errors_log(tmp_path):
@@ -485,6 +540,8 @@ def test_topic_public_validation_errors(tmp_path):
         queue_topic_merge_proposal(tmp_path, left_topic="missing-a", right_topic="missing-b", target_topic="combined")
     with pytest.raises(KBLibrarianError, match="Only topic split or merge"):
         apply_topic_review_item(tmp_path, {"payload": {"kind": "other"}})
+
+    _ensure_no_overlapping_topics(["alpha", "beta"])
 
 
 def test_topic_duplicate_proposals_return_existing_ids_and_unresolved_duplicates_raise(tmp_path, monkeypatch):
