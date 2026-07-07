@@ -108,6 +108,10 @@ class CompactionApplyResult:
 def scan_compaction_clusters(data_dir: Path, *, config: Mapping[str, Any]) -> CompactionScanResult:
     """Detect overlapping note clusters and queue durable review items."""
 
+    review_config = config.get("review", {})
+    if isinstance(review_config, Mapping) and bool(review_config.get("hygiene_fenced", False)):
+        return CompactionScanResult(clusters=[], review_item_ids=[])
+
     records = _eligible_records(load_note_records(data_dir, validate=True))
     ensure_unique_note_ids(records)
     threshold = _duplicate_cluster_threshold(config)
@@ -121,7 +125,6 @@ def scan_compaction_clusters(data_dir: Path, *, config: Mapping[str, Any]) -> Co
         usage_pairs=_load_retrieval_pairs(data_dir),
         merge_pairs=_load_merge_pairs(data_dir),
     )
-    review_config = config.get("review", {})
     cooldown_days = int(review_config.get("compaction_cooldown_days", 30)) if isinstance(review_config, Mapping) else 30
     item_ids: list[str] = []
     for cluster in clusters:
@@ -219,6 +222,12 @@ def draft_compaction_proposal(
     target: str,
 ) -> CompactionProposalResult:
     """Resolve a topic or cluster target, ask the provider for a draft, and queue it."""
+
+    review_config = config.get("review", {})
+    if isinstance(review_config, Mapping) and bool(review_config.get("hygiene_fenced", False)):
+        raise KBLibrarianError(
+            "Compaction proposals are disabled: review.hygiene_fenced is true for this KB."
+        )
 
     records = _eligible_records(load_note_records(data_dir, validate=True))
     ensure_unique_note_ids(records)

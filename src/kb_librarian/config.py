@@ -162,6 +162,7 @@ def default_config(data_dir: str | Path | None = None, *, hooks: bool = False) -
             "duplicate_cluster_threshold": 4,
             "compaction_cooldown_days": 30,
             "max_review_items_per_run": 10,
+            "hygiene_fenced": False,
         },
         "git": {
             "auto_commit": False,
@@ -426,6 +427,10 @@ def validate_config(config: Mapping[str, Any]) -> None:
         value = indexes[key]
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
             raise ConfigError(f"Config key indexes.{key} must be a positive integer.")
+
+    review = config["review"]
+    if "hygiene_fenced" in review and not isinstance(review["hygiene_fenced"], bool):
+        raise ConfigError("Config key review.hygiene_fenced must be a boolean.")
 
     git = config["git"]
     for key in (

@@ -193,6 +193,53 @@ def test_resolve_compaction_target_accepts_topic_and_rejects_single_note_topic(t
         resolve_compaction_target(tmp_path, records, "python")
 
 
+def test_scan_compaction_clusters_yields_nothing_when_hygiene_fenced(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    config["review"]["duplicate_cluster_threshold"] = 3
+    config["review"]["hygiene_fenced"] = True
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+    for index in range(3):
+        _write_note(
+            tmp_path,
+            note_id=f"2026-05-05-context-module-{index}",
+            title=f"Context module for agents {index}",
+            summary="Agents should use compact context modules.",
+        )
+
+    result = scan_compaction_clusters(tmp_path, config=config)
+
+    assert result.clusters == []
+    assert result.review_item_ids == []
+
+
+def test_draft_compaction_proposal_blocked_when_hygiene_fenced(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = default_config(tmp_path)
+    config["providers"]["mock"] = {}
+    config["operations"]["compact"] = {"provider": "mock", "model": "mock-compact"}
+    config["review"]["hygiene_fenced"] = True
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+    _write_note(
+        tmp_path,
+        note_id="2026-05-05-agent-context-a",
+        title="Agent context A",
+        summary="Use context before coding.",
+    )
+    _write_note(
+        tmp_path,
+        note_id="2026-05-05-agent-context-b",
+        title="Agent context B",
+        summary="Cite context sources.",
+    )
+
+    with pytest.raises(KBLibrarianError, match="hygiene_fenced"):
+        draft_compaction_proposal(tmp_path, config=config, target="agent-systems")
+
+    state = json.loads(review_state_path(tmp_path).read_text(encoding="utf-8"))
+    assert state["items"] == []
+
+
 def test_draft_compaction_proposal_with_mock_provider_queues_review_item(tmp_path):
     initialize_data_dir(tmp_path)
     config = default_config(tmp_path)

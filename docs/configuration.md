@@ -105,6 +105,7 @@ review:
   duplicate_cluster_threshold: 4
   compaction_cooldown_days: 30
   max_review_items_per_run: 10
+  hygiene_fenced: false
 
 git:
   auto_commit: false
@@ -406,6 +407,7 @@ Useful review settings:
 - `duplicate_cluster_threshold`: minimum overlapping notes required before `kb reindex --scan-clusters` queues a compaction cluster
 - `compaction_cooldown_days`: days before a rejected compaction cluster can be reopened by another scan
 - `max_review_items_per_run`: maximum items shown by default in `kb review`
+- `hygiene_fenced`: when `true`, disables only the hygiene queue types KB-wide — `kb compact` raises an error instead of drafting a proposal, and hygiene scans (`kb reindex --scan-clusters`) skip cluster detection and stale/orphan/low-utility flagging. Classification and parser-failure queues, and `kb flag-suspect`, are unaffected.
 
 ## Hooks Flag
 

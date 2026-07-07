@@ -44,9 +44,14 @@ def scan_hygiene_queues(
     config: Mapping[str, Any],
     today: date | None = None,
 ) -> HygieneScanResult:
+    review_config = config.get("review", {}) if isinstance(config.get("review"), Mapping) else {}
+    if bool(review_config.get("hygiene_fenced", False)):
+        # ponytail: hygiene fence only covers scan-driven queues (stale/orphan/low_utility here,
+        # compaction in compaction.py); flag-suspect and classification/parser_failure are untouched.
+        return HygieneScanResult(stale_item_ids=[], orphan_item_ids=[], low_utility_item_ids=[])
+
     records = load_note_records(data_dir, validate=True)
     anchor = today or date.today()
-    review_config = config.get("review", {}) if isinstance(config.get("review"), Mapping) else {}
     stale_after_days = int(review_config.get("stale_after_days", 180))
     orphan_after_days = int(review_config.get("orphan_after_days", 30))
 

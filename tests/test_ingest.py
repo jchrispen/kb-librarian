@@ -202,6 +202,22 @@ def test_ingest_ambiguous_candidate_goes_to_pending_classification(tmp_path):
     assert not source.exists()
 
 
+def test_ingest_ambiguous_candidate_goes_to_classification_when_hygiene_fenced(tmp_path):
+    initialize_data_dir(tmp_path)
+    config = mock_config(tmp_path)
+    config["review"]["hygiene_fenced"] = True
+    write_config_file(tmp_path / ".kb" / "config.yaml", config)
+    source = tmp_path / "raw" / "ambiguous.md"
+    source.write_text("# Ambiguous idea\n\nThis ambiguous agent note needs classification.\n", encoding="utf-8")
+
+    report = ingest(tmp_path, config=config)
+
+    assert report.created_notes == []
+    assert len(report.classification_items) == 1
+    review = (tmp_path / "review" / "pending-classification.md").read_text(encoding="utf-8")
+    assert "Ambiguous idea" in review
+
+
 def test_ingest_duplicate_success_hash_archives_to_duplicates(tmp_path):
     initialize_data_dir(tmp_path)
     config = configure_mock_provider(tmp_path)

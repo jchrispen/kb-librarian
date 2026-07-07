@@ -87,6 +87,30 @@ def test_scan_hygiene_queues_flags_stale_fact_and_orphan(tmp_path):
     assert "- note_id: 2026-01-01-isolated-note" in orphan_md
 
 
+def test_scan_hygiene_queues_yields_nothing_when_hygiene_fenced(tmp_path):
+    initialize_data_dir(tmp_path)
+    old_day = (date.today() - timedelta(days=210)).isoformat()
+    _write_note(
+        tmp_path,
+        note_id="2026-01-01-old-fact",
+        title="Old fact",
+        summary="Needs reverification.",
+        knowledge_type="fact",
+        staleness_risk="high",
+        updated=old_day,
+        tags=["freshness"],
+    )
+    reindex_data_dir(tmp_path)
+
+    config = default_config(tmp_path)
+    config["review"]["hygiene_fenced"] = True
+    scan = scan_hygiene_queues(tmp_path, config=config)
+
+    assert scan.item_ids == []
+    state = json.loads(review_state_path(tmp_path).read_text(encoding="utf-8"))
+    assert state["items"] == []
+
+
 def test_scan_hygiene_queues_flags_low_utility_from_retrieval_mismatch(tmp_path):
     initialize_data_dir(tmp_path)
     _write_note(
